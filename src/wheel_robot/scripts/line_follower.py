@@ -32,6 +32,9 @@ class DetectionResult:
     reason: str
     debug_frame: np.ndarray
     corner: bool = False  # 近段处于"急弯横段"状态：应以原地转向为主
+    # Optional vision-element overrides. Defaults preserve the original follower.
+    speed_limit: Optional[float] = None
+    inhibit_hold: bool = False
 
 
 @dataclass
@@ -814,6 +817,11 @@ class LineFollower(Node):
             self.band_require_near,
         )
 
+        self._roundabout = None
+        self._roundabout_owns_control = False
+        self._roundabout_init_error = ""
+        self._last_roundabout_mode = "off"
+
         if self.show_debug:
             try:
                 cv2.namedWindow(self.debug_window_name, cv2.WINDOW_NORMAL)
@@ -844,6 +852,7 @@ class LineFollower(Node):
     def _declare_parameters(self) -> None:
         defaults = {
             "enable_motion": False,
+            "roundabout_mode": "off",  # off / observe / control; lazy optional module
             # 斑马线检测：同目录另一个独立程序的接口，默认关闭。
             # 关闭时不会 import zebra_crossing_detector，巡线零额外开销。
             "enable_zebra": False,
@@ -1253,6 +1262,34 @@ class LineFollower(Node):
             self.get_logger().error(f"巡线控制异常，立即停车: {error}")
             self._publish_zero("control_exception")
 
+    def _apply_roundabout(self, frame, result, now, allowed=True):
+        """Optional visual branch selector; off returns the original object."""
+        mode = str(self.get_parameter("roundabout_mode").value).lower()
+        if mode not in ("off", "observe", "control"):
+            mode = "off"
+        if mode != self._last_roundabout_mode:
+            self._roundabout_init_error = ""
+            self._last_roundabout_mode = mode
+        if mode == "off":
+            if self._roundabout is not None:
+                self._roundabout.reset_mode(mode)
+            self._roundabout_owns_control = False
+            return result
+        if self._roundabout is None:
+            if self._roundabout_init_error:
+                return result
+            try:
+                # No new import/dependency is required for baseline-only use.
+                from roundabout import RoundaboutAdapter
+                self._roundabout = RoundaboutAdapter(self)
+            except Exception as error:
+                self._roundabout_init_error = str(error)
+                self.get_logger().error(f"圆环模块未加载，保留基础巡线: {error}")
+                return result
+        result = self._roundabout.process(frame, result, now, mode, allowed)
+        self._roundabout_owns_control = self._roundabout.owns_control
+        return result
+
     def _run_control_cycle(self) -> None:
         now = time.monotonic()
         with self._frame_lock:
@@ -1284,11 +1321,17 @@ class LineFollower(Node):
         self._update_zebra(frame)
 
         result = self.detector.detect(frame)
+        result = self._apply_roundabout(frame, result, now)
+        if time.monotonic()-frame_time > self.image_timeout_seconds:
+            self._publish_zero("processing_image_timeout")
+            self._show_debug(result, 0.0, 0.0, False)
+            return
         if not result.valid:
             # 单帧失效不立刻归零：保持上一帧指令 lost_hold_frames 帧，
             # 连续丢线超过窗口才真正停车（定速下避免"抖一下就掉到 0"）。
             if (
                 self.enable_motion
+                and not result.inhibit_hold
                 and self._last_command_valid
                 and self._lost_hold > 0
             ):
@@ -1339,12 +1382,16 @@ class LineFollower(Node):
             np.clip(raw_angular, -self.max_angular_speed, self.max_angular_speed)
         )
         linear = self.forward_speed
+        if result.speed_limit is not None:
+            linear = min(linear, result.speed_limit)
         planned_linear, planned_angular = linear, angular
 
         if self.enable_motion:
             command_linear, command_angular = self._limit_command_rate(
                 planned_linear, planned_angular, now
             )
+            if result.speed_limit is not None:
+                command_linear = min(command_linear, result.speed_limit)
             self._publish_command(command_linear, command_angular)
             self._last_command = (command_linear, command_angular)
             self._last_command_valid = True
@@ -1415,13 +1462,19 @@ class LineFollower(Node):
             cv2.LINE_AA,
         )
         display = debug
+        ring = getattr(self, "_roundabout", None)
+        if ring is not None and ring.mode != "off" and hasattr(ring, "panel"):
+            display = np.concatenate((debug, ring.panel), axis=1)
+        elif getattr(self, "_roundabout_init_error", ""):
+            cv2.putText(display, "RING DISABLED: module/config error; see log",
+                        (12, 126), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 165, 255), 1, cv2.LINE_AA)
         if self.debug_fullscreen:
             if not self._debug_fullscreen_requested:
-                self._setup_debug_fullscreen(debug)
+                self._setup_debug_fullscreen(display)
             if self.debug_scale_mode == "manual":
                 target_size = self._manual_canvas_size()
                 if target_size is not None:
-                    display = self._fit_to_content(debug, target_size)
+                    display = self._fit_to_content(display, target_size)
         cv2.imshow(self.debug_window_name, display)
         key = cv2.waitKey(1) & 0xFF
         if key in (ord("q"), ord("Q"), 27):

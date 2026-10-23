@@ -1,5 +1,6 @@
 line_follower:
   ros__parameters:
+    roundabout_mode: "off"  # 基础巡线默认旁路圆环，不加载圆环模块
     # 直接发布可执行的 /cmd_vel（不再做架空 dry-run）。
     # 想只识别不动车：ros2 launch ... enable_motion:=false，或这里改回 false。
     # 车只在本帧"看过线且置信度达标"时才前进；丢线/低置信/相机超时都会立即发零。

@@ -11,6 +11,8 @@ install(PROGRAMS
   scripts/line_follower.py
   scripts/double_line_follower.py
   scripts/zebra_crossing_detector.py
+  scripts/step_detector.py
+  scripts/roundabout.py
   scripts/icn.py   
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -21,5 +23,7 @@ install(DIRECTORY
   config
   DESTINATION share/${PROJECT_NAME}
 )
+
+install(DIRECTORY docs DESTINATION share/${PROJECT_NAME})
 
 ament_package()

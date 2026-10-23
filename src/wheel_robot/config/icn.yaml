@@ -1,6 +1,58 @@
 # 顶层 key 必须是 line_follower：icn.py 继承的父类把节点名写死成 "line_follower"
 line_follower:
   ros__parameters:
+    # 圆环：从下方切线向右上进入，逆时针一圈后沿切线退出。
+    # observe 只画调试信息；control 才接管；off 保持原巡线。
+    roundabout_mode: "observe"
+    roundabout.heading_source: "imu"  # imu 或 odom；运行中不切换数据源
+    roundabout.imu_topic: "/imu/data"
+    roundabout.odom_topic: "/odom"
+    # 本仓库 wl_base_node.cpp 把 q0(w),q1(x),q2(y),q3(z) 写入 x,y,z,w。
+    # 使用标准 ROS IMU 驱动时必须改为 xyzw。
+    roundabout.imu_layout: "wxyz_in_xyzw"
+    roundabout.yaw_sign: 1.0
+    roundabout.image_turn_sign: -1  # 非镜像前视图：入环曲线向图像左侧弯
+    roundabout.roi_top: 0.42
+    roundabout.roi_bottom: 0.98
+    roundabout.roi_left: 0.02
+    roundabout.roi_right: 0.98
+    roundabout.black_max: 75
+    roundabout.adaptive: true
+    roundabout.perspective: false  # 未标定先不开；开启后需按实拍标定梯形
+    roundabout.top_left: 0.20
+    roundabout.top_right: 0.80
+    roundabout.bottom_left: 0.0
+    roundabout.bottom_right: 1.0
+    roundabout.min_width: 0.009
+    roundabout.max_width: 0.09
+    roundabout.max_gap: 0.24
+    roundabout.min_span: 0.48
+    roundabout.min_confidence: 0.50
+    roundabout.branch_separation: 0.08
+    roundabout.lookahead: 0.55
+    roundabout.max_track_jump: 0.16
+    roundabout.confirm_frames: 4
+    roundabout.exit_confirm_frames: 4
+    roundabout.recovery_frames: 8
+    roundabout.enter_speed: 0.08
+    roundabout.follow_speed: 0.12
+    roundabout.exit_speed: 0.08
+    roundabout.predict_speed: 0.05
+    roundabout.predict_seconds: 0.20
+    roundabout.predict_distance: 0.015
+    roundabout.enter_degrees: 35.0
+    roundabout.exit_min_degrees: 325.0
+    roundabout.exit_max_degrees: 395.0
+    roundabout.exit_heading_tolerance: 25.0
+    roundabout.entry_timeout: 8.0
+    roundabout.lap_timeout: 60.0
+    roundabout.exit_timeout: 6.0
+    roundabout.cooldown_seconds: 8.0
+    roundabout.rearm_clear_frames: 20
+    roundabout.sensor_timeout: 0.40
+    roundabout.max_tilt_degrees: 20.0
+    roundabout.max_processing_seconds: 0.15
+
     # ---------------- 斑马线 ----------------
     enable_zebra: true
     zebra_decimate: 2

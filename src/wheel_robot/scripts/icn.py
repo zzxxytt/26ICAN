@@ -5,6 +5,7 @@
     LINE   —— 黑线巡线（完全复用 line_follower.py 的检测器与控制律）
     ZEBRA  —— 斑马线（复用 zebra_crossing_detector.py 的纯视觉函数）
     STAIR  —— 台阶（复用 step_detector.py，默认动作=停车，动作可替换）
+    圆环   —— LINE 内的可选视觉子状态机，roundabout_mode=off 完全旁路
     FINISH —— 任务结束，原地停车
 
 为什么合并成一个节点：
@@ -348,6 +349,8 @@ class IcnNode(line_lib.LineFollower):
             return
 
         if self.state is MissionState.LINE:
+            if self._roundabout_owns_control:
+                return  # Dashed gaps must not trigger the step/zebra actions.
             if (
                 self.enable_zebra
                 and self._zebra_armed
@@ -418,12 +421,14 @@ class IcnNode(line_lib.LineFollower):
         )
         return float(np.clip(raw, -self.max_angular_speed, self.max_angular_speed))
 
-    def _emit(self, now: float, linear: float, angular: float) -> tuple:
+    def _emit(self, now: float, linear: float, angular: float, speed_limit=None) -> tuple:
         """唯一速度出口：运动开启时限加速度后发布，架空时发零只做显示。"""
         if not self.enable_motion:
             self._publish_zero("motion_disabled")
             return linear, angular
         cmd_linear, cmd_angular = self._limit_command_rate(linear, angular, now)
+        if speed_limit is not None:
+            cmd_linear = min(cmd_linear, speed_limit)
         self._publish_command(cmd_linear, cmd_angular)
         self._last_command = (cmd_linear, cmd_angular)
         self._last_command_valid = True
@@ -457,8 +462,19 @@ class IcnNode(line_lib.LineFollower):
         self._last_processed_sequence = sequence
 
         result = self.detector.detect(frame)        # 巡线：每帧都跑
-        self._update_zebra_element(frame)           # 斑马线：抽帧跑
-        self._update_step_element(frame)            # 台阶：抽帧跑
+        result = self._apply_roundabout(
+            frame, result, now, allowed=self.state is MissionState.LINE
+        )
+        if time.monotonic()-frame_time > self.image_timeout_seconds:
+            self._publish_zero("processing_image_timeout")
+            self._show_debug(result, 0.0, 0.0, False)
+            return
+        if not self._roundabout_owns_control:
+            self._update_zebra_element(frame)       # 保持原有元素优先级
+            self._update_step_element(frame)
+        else:
+            self._zebra_hit = self._zebra_miss = self._step_hit = 0
+            self._zebra_confirmed = self._step_confirmed = False
         self._step_state(now)                       # 状态迁移
 
         # ---------------- FINISH ----------------
@@ -507,6 +523,7 @@ class IcnNode(line_lib.LineFollower):
         if not result.valid:
             if (
                 self.enable_motion
+                and not result.inhibit_hold
                 and self._last_command_valid
                 and self._lost_hold > 0
             ):
@@ -527,8 +544,11 @@ class IcnNode(line_lib.LineFollower):
         self._lost_hold = self.lost_hold_frames
         approaching = self._zebra_armed and self._zebra_hit > 0
         scale = self.zebra_approach_slowdown if approaching else 1.0
+        linear = self.forward_speed * scale
+        if result.speed_limit is not None:
+            linear = min(linear, result.speed_limit)
         cmd_linear, cmd_angular = self._emit(
-            now, self.forward_speed * scale, self._steering(now, result)
+            now, linear, self._steering(now, result), result.speed_limit
         )
         self._show_debug(result, cmd_linear, cmd_angular, self.enable_motion)
         self._log_status(

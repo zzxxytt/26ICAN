@@ -13,9 +13,15 @@ def generate_launch_description():
     line_params = PathJoinSubstitution([share, "config", "line_follower.yaml"])
     element_params = PathJoinSubstitution([share, "config", "icn.yaml"])
     enable_motion = LaunchConfiguration("enable_motion")
+    roundabout_mode = LaunchConfiguration("roundabout_mode")
 
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                "roundabout_mode", default_value="observe",
+                choices=["off", "observe", "control"],
+                description="off: original line following; observe: HUD only; control: circle task",
+            ),
             DeclareLaunchArgument(
                 "enable_motion",
                 default_value="true",
@@ -33,7 +39,8 @@ def generate_launch_description():
                     {
                         "enable_motion": ParameterValue(
                             enable_motion, value_type=bool
-                        )
+                        ),
+                        "roundabout_mode": ParameterValue(roundabout_mode, value_type=str),
                     },
                 ],
             ),
