@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>recognize_yolo</name>
+  <version>0.1.0</version>
+  <description>
+    YOLO object detection for the wheel-legged robot on Orange Pi 4 Pro (Allwinner A733,
+    Vivante VIP9000 NPU). Publishes structured detection results for other ROS 2 nodes.
+  </description>
+  <maintainer email="orangepi@example.com">orangepi</maintainer>
+  <license>Apache-2.0</license>
+
+  <!-- 构建工具 -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <!--
+    自定义消息定义在独立包里。
+    这不是为了整洁，而是 ROS 2 的硬性限制：同一个 CMake 工程里同时调用
+    rosidl_generate_interfaces() 和 ament_python_install_package() 会导致
+    add_custom_target 重名而构建失败。详见 recognize_yolo_msgs/package.xml。
+  -->
+  <depend>recognize_yolo_msgs</depend>
+
+  <!-- 构建与运行都要用的依赖 -->
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>python3-opencv</depend>
+  <depend>python3-numpy</depend>
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
+
+  <!--
+    以下是可选的运行时依赖，节点里都用 try/except 做了降级，
+    没装也能跑（只是少一个输出格式）：
+      vision_msgs      -> vision_info_node 的 Detection2DArray 输出
+      image_transport  -> 图像话题的压缩传输支持
+  -->
+  <exec_depend>vision_msgs</exec_depend>
+  <exec_depend>image_transport</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

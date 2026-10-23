@@ -1,0 +1,69 @@
+# YOLO 识别节点参数 —— NPU (VIPLite) 路线
+#
+# 用途：在香橙派 4 Pro 的 A733 NPU 上跑预先转好的 NBG 模型。
+# 使用前必须先确认两件事：
+#   1. scripts/check_npu_env.py 全绿
+#   2. yolo_npu_worker --model <你的.nb> --probe 打印的输入张量边长 == input_size
+#
+# 路径里的 ~ 不会自动展开，建议按实际路径写全，或用 launch 参数覆盖。
+
+recognize_yolo:
+  ros__parameters:
+    # ---------------- 图像来源 ----------------
+    # camera: 本节点直接开摄像头（默认，和 camera_viewer.py 的用法一致）
+    # image_topic: 订阅已有的图像话题，需要 cv_bridge
+    source: "camera"
+    image_topic: "/camera/image_raw"
+    camera_id: 0
+    camera_device: ""
+    image_width: 640
+    image_height: 480
+    frame_rate: 0.0
+    pixel_format: "MJPG"
+    # 观察画面后按实际安装方向修改：0、90、180、270
+    rotation_degrees: 0
+    mirror_mode: "none"
+    # source=image_topic 时，若话题在 topic_wait_timeout 秒内没有数据则退回开摄像头
+    fallback_to_camera: true
+    topic_wait_timeout: 5.0
+
+    # ---------------- 推理后端 ----------------
+    backend: "npu"
+    input_size: 640
+
+    # NPU 输入通道顺序。ACUITY 转换时用的什么顺序，这里就必须是什么。
+    # 官方 model zoo 的 yolov5s_rt 例子用的是 rgb。
+    # 如果画面框位置正确但类别明显错乱，优先怀疑这一项。
+    input_color: "rgb"
+
+    # 必须和模型导出时的 (5 + 类别数) 对得上，否则解码会直接报通道数不匹配
+    num_classes: 80
+    class_names_file: ""   # 留空则用下面的 class_names；建议改成 classes_coco.txt 的绝对路径
+    class_names: ""
+
+    # ---------------- 自定义消息发布 ----------------
+    # 这几个是 launch 里用 -p 传的运行时参数，写在文件里便于查阅：
+    #   npu_worker_path  编译产物 install/recognize_yolo/lib/recognize_yolo/yolo_npu_worker
+    #   npu_model_path   NBG 模型路径，例如 ~/models/yolov5s_rt_uint8_a733.nb
+    npu_worker_path: ""
+    npu_model_path: ""
+    npu_startup_timeout: 30.0
+
+    # ---------------- 解码与筛选 ----------------
+    # 置信度阈值。现场误检多就往上调，漏检多就往下调。
+    conf_threshold: 0.25
+    # NMS IoU 阈值。同一目标出多个框就调小，目标挨得近被合并就调大。
+    iou_threshold: 0.45
+    max_detections: 100
+    # 过滤掉面积过小的框（像素²），用于压制远处的噪声，0 表示不过滤
+    min_box_area: 0.0
+    # NPU 输出已经是 0~1 的概率时保持 false；若确认输出是 logits 再打开
+    apply_sigmoid: false
+
+    # ---------------- 运行节奏与输出 ----------------
+    process_rate: 10.0
+    publish_debug_image: true
+    publish_json: true
+    log_detections: true
+    # 调试解码问题时打开，会打印每个输出头的形状
+    log_tensor_shapes: false

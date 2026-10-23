@@ -1,0 +1,70 @@
+double_line_follower:
+  ros__parameters:
+    # 首先保持 false，只识别双白线并持续发布零速度。
+    enable_motion: false
+
+    camera_backend: "v4l2"
+    camera_id: 0
+    camera_device: "/dev/video0"
+    image_width: 640
+    image_height: 480
+    capture_frame_rate: 30.0
+    pixel_format: "YUYV"
+    rotation_degrees: 0
+    mirror_mode: "none"
+    camera_retry_seconds: 1.0
+    image_timeout_seconds: 0.35
+
+    control_rate: 15.0
+    show_debug: true
+    debug_window_name: "Dual White Line Follower (Q/Esc to stop)"
+
+    search_top_ratio: 0.65
+    # 实际画面下部双线已经向左右出框，只使用两条线同时可见的区域。
+    search_bottom_ratio: 0.86
+    search_left_ratio: 0.02
+    search_right_ratio: 0.98
+
+    # 白色初值；需结合实际地面颜色和曝光用调试画面标定。
+    white_saturation_max: 75
+    # 自适应阈值负责区分地面；这里仅排除过暗、明显不是白线的区域。
+    white_value_min: 120
+    adaptive_bright_enabled: true
+    adaptive_block_size: 51
+    adaptive_c: -12.0
+    # 左右白线必须比两线之间的赛道至少亮此数值。
+    min_boundary_lane_contrast: 8.0
+    morphology_kernel: 3
+
+    # 单条白线宽度（相对 ROI 宽度）。
+    min_line_width_ratio: 0.008
+    max_line_width_ratio: 0.10
+    expected_line_width_ratio: 0.025
+    width_tolerance_ratio: 0.035
+
+    # 左右白线中心间距（相对 ROI 宽度）。
+    # 当前实测 lane≈408 px，ROI 宽约 614 px，即比例约 0.66。
+    min_lane_width_ratio: 0.45
+    max_lane_width_ratio: 0.85
+    expected_lane_width_ratio: 0.64
+    lane_width_tolerance_ratio: 0.22
+    # 限制相邻扫描行突然切换到地砖或物体亮边。
+    max_center_jump_ratio: 0.02
+    min_valid_row_fraction: 0.35
+    min_confidence: 0.52
+    target_offset_pixels: 0.0
+
+    forward_speed: 0.20
+    minimum_forward_speed: 0.08
+    # 与键盘和单线巡线统一：正 linear.x 为物理前进。
+    linear_direction_sign: 1.0
+    steering_kp: 1.00
+    steering_kd: 0.025
+    steering_sign: -1.0
+    max_angular_speed: 0.40
+    max_linear_acceleration: 0.30
+    max_angular_acceleration: 1.20
+    max_error_derivative: 3.0
+    error_filter_alpha: 0.45
+    curve_slowdown: 0.60
+    status_log_period: 1.0

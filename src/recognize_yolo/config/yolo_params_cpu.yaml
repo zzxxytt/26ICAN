@@ -1,0 +1,63 @@
+# YOLO 识别节点参数 —— CPU (ONNX Runtime) 路线
+#
+# 用途有两个：
+#   1. NPU 还没调通时先把整条 ROS 链路跑起来
+#   2. 作为精度对照基准，判断是量化掉精度还是后处理写错了
+#
+# 模型准备：pip3 install ultralytics
+#   yolo export model=yolov8n.pt format=onnx imgsz=320 simplify=True
+#
+# 性能预期（A733 双核 A76 + 六核 A55）：YOLOv8n @ 320 大约几 FPS，
+# 只适合静态验证，实时跟随请用 NPU 路线。
+
+recognize_yolo:
+  ros__parameters:
+    # ---------------- 图像来源 ----------------
+    source: "camera"
+    image_topic: "/camera/image_raw"
+    camera_id: 0
+    camera_device: ""
+    image_width: 640
+    image_height: 480
+    frame_rate: 0.0
+    pixel_format: "AUTO"
+    rotation_degrees: 0
+    mirror_mode: "none"
+    fallback_to_camera: true
+    topic_wait_timeout: 5.0
+
+    # ---------------- 推理后端 ----------------
+    backend: "onnx"
+    # 必须和 ONNX 模型导出的 imgsz 一致，否则会上报输入尺寸不匹配
+    input_size: 320
+    input_color: "rgb"
+
+    num_classes: 80
+    class_names_file: ""
+    class_names: ""
+
+    # 改成你的 ONNX 模型绝对路径
+    onnx_model_path: ""
+    onnx_input_name: ""            # 留空自动取模型第一个输入
+    onnx_providers: "CPUExecutionProvider"
+    # A733 有 8 个核，交给 onnxruntime 自己调度即可；想限制占用可设成 2
+    onnx_intra_op_threads: 0
+    # YOLOv5/v8 官方预处理就是 x/255，这里保持默认
+    onnx_scale: 0.00392156862745098
+    onnx_mean: [0.0, 0.0, 0.0]
+    onnx_std: [1.0, 1.0, 1.0]
+
+    # ---------------- 解码与筛选 ----------------
+    conf_threshold: 0.25
+    iou_threshold: 0.45
+    max_detections: 100
+    min_box_area: 0.0
+    apply_sigmoid: false
+
+    # ---------------- 运行节奏与输出 ----------------
+    # CPU 路线算得慢，频率压低避免堆帧
+    process_rate: 5.0
+    publish_debug_image: true
+    publish_json: true
+    log_detections: true
+    log_tensor_shapes: false

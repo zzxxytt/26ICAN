@@ -1,0 +1,49 @@
+# 顶层 key 必须是 line_follower：icn.py 继承的父类把节点名写死成 "line_follower"
+line_follower:
+  ros__parameters:
+    # ---------------- 斑马线 ----------------
+    enable_zebra: true
+    zebra_decimate: 2
+
+    zebra_roi_top_ratio: 0.70
+    zebra_roi_bottom_ratio: 1.00
+    zebra_roi_left_ratio: 0.15
+    zebra_roi_right_ratio: 0.85
+    zebra_perspective_enabled: true
+
+    zebra_saturation_max: 75
+    zebra_value_min: 130
+    zebra_minimum_stripe_count: 3
+    zebra_maximum_stripe_count: 10
+    zebra_confirm_frames: 2
+    zebra_release_frames: 3
+
+    zebra_approach_slowdown: 0.50
+    zebra_stop_seconds: 3.0
+    zebra_cross_speed: 0.35
+    zebra_cross_min_seconds: 4.0
+    zebra_cross_max_seconds: 8.0
+    zebra_cooldown_seconds: 1.0
+    zebra_exit_grace_frames: 8
+    zebra_target_count: 2
+
+    # ---------------- 台阶 ----------------
+    step_enabled: true
+    step_decimate: 2
+    step_confirm_frames: 3
+    step_action: "stop"
+    step_hold_seconds: 5.0      # 0 = 检测到就一直停；设 5.0 = 停 5 秒后继续
+    step_stop_seconds: 1.0
+    step_climb_speed: 0.15
+    step_climb_seconds: 3.0
+    step_cooldown_seconds: 2.0
+    step_exit_grace_frames: 10
+
+    # 左中右：只检测 ROI 水平方向 30%~70% 这条中心列带
+    step_center_left_ratio: 0.30
+    step_center_right_ratio: 0.70
+    step_bright_value_min: 110
+    step_gap_bright_min: 0.55
+    step_min_gap_rows: 12
+
+    mission_timeout_seconds: 0.0

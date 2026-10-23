@@ -1,0 +1,156 @@
+cmake_minimum_required(VERSION 3.8)
+project(recognize_yolo)
+
+# ===========================================================================
+# 临时诊断版 CMakeLists.txt
+#
+# 目的：确认这份 CMakeLists 在一次 configure 里被执行了几遍。
+# 用全局属性（不是普通变量）计数，全局属性不受 CMake 目录作用域影响，
+# 所以嵌套 add_subdirectory 或变量作用域问题都能被如实反映。
+#
+# 预期与结论：
+#   CONFIGURE_COUNT=1 且构建成功 -> 原来的报错来自别处（多为构建缓存）
+#   CONFIGURE_COUNT=2            -> CMakeLists 被执行了两遍，双重配置问题
+# ===========================================================================
+get_property(_configure_count GLOBAL PROPERTY RECOGNIZE_YOLO_CONFIGURE_COUNT)
+if(NOT _configure_count)
+  set(_configure_count 0)
+endif()
+math(EXPR _configure_count "${_configure_count} + 1")
+set_property(GLOBAL PROPERTY RECOGNIZE_YOLO_CONFIGURE_COUNT ${_configure_count})
+
+# 同时把关键路径与变量打进 CMakeCache，便于事后核对
+set(RY_DIAG_COUNT ${_configure_count} CACHE STRING "recognize_yolo: configure 执行次数" FORCE)
+
+message(STATUS "==================== recognize_yolo 诊断 ====================")
+message(STATUS "CONFIGURE_COUNT (全局计数) = ${_configure_count}")
+message(STATUS "CMAKE_CURRENT_LIST_DIR     = ${CMAKE_CURRENT_LIST_DIR}")
+message(STATUS "CMAKE_CURRENT_SOURCE_DIR   = ${CMAKE_CURRENT_SOURCE_DIR}")
+message(STATUS "PROJECT_NAME               = ${PROJECT_NAME}")
+message(STATUS "CMAKE_CURRENT_BINARY_DIR   = ${CMAKE_CURRENT_BINARY_DIR}")
+message(STATUS "AMENT_CMAKE_SYMLINK_INSTALL= ${AMENT_CMAKE_SYMLINK_INSTALL}")
+message(STATUS "BUILD_TESTING              = ${BUILD_TESTING}")
+message(STATUS "===========================================================")
+
+# 检查根目录是否存在会让 CMake 自动 add_subdirectory 的残留标志
+foreach(_stray setup.py setup.cfg pyproject.toml)
+  if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/${_stray}")
+    message(WARNING "认到根目录残留文件 ${_stray} —— 它可能让 CMake 把子目录当独立项目再配置一遍")
+  endif()
+endforeach()
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/${PROJECT_NAME}/CMakeLists.txt")
+  message(WARNING "认到 ${PROJECT_NAME}/CMakeLists.txt —— 子包被当成子项目了！这就是双重配置的直接原因")
+endif()
+
+# ===========================================================================
+# 以下与原版一致
+# ===========================================================================
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Detection.msg"
+  "msg/DetectionArray.msg"
+  DEPENDENCIES std_msgs
+)
+
+option(RECOGNIZE_YOLO_NPU "Build the VIPLite NPU worker" ON)
+option(RECOGNIZE_YOLO_NPU_ROOT "Root of the VIPLite runtime copied from the AW model zoo" "")
+
+set(NPU_WORKER_TARGET "")
+
+if(RECOGNIZE_YOLO_NPU)
+  find_package(OpenCV QUIET COMPONENTS core imgproc imgcodecs)
+  find_package(Threads REQUIRED)
+
+  find_path(VIP_LITE_INCLUDE_DIR
+    NAMES vip_lite.h
+    HINTS
+      ${RECOGNIZE_YOLO_NPU_ROOT}/include
+      /usr/include
+      /usr/local/include
+      /opt/vip/include
+  )
+
+  find_library(VIP_LITE_LIBRARY
+    NAMES vip-lite vip_lite
+    HINTS
+      ${RECOGNIZE_YOLO_NPU_ROOT}/lib
+      ${RECOGNIZE_YOLO_NPU_ROOT}/lib_linux_aarch64/A733
+      /usr/lib
+      /usr/local/lib
+      /usr/lib/aarch64-linux-gnu
+  )
+
+  if(VIP_LITE_INCLUDE_DIR AND VIP_LITE_LIBRARY)
+    message(STATUS "recognize_yolo: VIPLite 已找到, 将编译 NPU worker")
+    add_executable(yolo_npu_worker
+      src/yolo_npu_worker.cpp
+      src/vip_runner.cpp
+      src/postprocess.cpp
+    )
+    target_include_directories(yolo_npu_worker PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
+      ${VIP_LITE_INCLUDE_DIR}
+    )
+    target_link_libraries(yolo_npu_worker PRIVATE
+      ${VIP_LITE_LIBRARY}
+      ${OpenCV_LIBS}
+      Threads::Threads
+    )
+    set(NPU_WORKER_TARGET yolo_npu_worker)
+  else()
+    message(WARNING
+      "recognize_yolo: 未找到 VIPLite 运行时 (vip_lite.h / libvip-lite.so)。\n"
+      "  跳过 yolo_npu_worker 的编译。")
+  endif()
+endif()
+
+# Python 包与节点
+ament_python_install_package(${PROJECT_NAME})
+
+install(PROGRAMS
+  scripts/detector_node.py
+  scripts/vision_info_node.py
+  scripts/check_npu_env.py
+  scripts/capture_dataset.py
+  scripts/prepare_dataset.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+if(NPU_WORKER_TARGET)
+  install(TARGETS ${NPU_WORKER_TARGET}
+    DESTINATION lib/${PROJECT_NAME}
+  )
+endif()
+
+install(DIRECTORY
+  launch
+  config
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(DIRECTORY models/
+  DESTINATION share/${PROJECT_NAME}/models
+  OPTIONAL
+)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_postprocess test/test_postprocess.py)
+  ament_add_pytest_test(test_geometry test/test_geometry.py)
+endif()
+
+ament_export_dependencies(rosidl_default_runtime)
+ament_package()
