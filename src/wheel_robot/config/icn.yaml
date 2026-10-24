@@ -96,6 +96,6 @@ line_follower:
     step_center_right_ratio: 0.70
     step_bright_value_min: 110
     step_gap_bright_min: 0.55
-    step_min_gap_rows: 12
+    step_min_gap_rows: 20
 
     mission_timeout_seconds: 0.0

@@ -266,6 +266,9 @@ class IcnNode(line_lib.LineFollower):
         elif self._step_confirmed and self._step_hit == 0:
             self._step_confirmed = False
 
+        if not self._step_confirmed and self._step_hit == 0:
+            self._step_armed = True
+
         self._step_pub.publish(Bool(data=self._step_confirmed))
 
     # ============================================================ 状态机

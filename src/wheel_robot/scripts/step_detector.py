@@ -80,7 +80,7 @@ class StepConfig:
 
     # ---------------- 近段（贴车轮那一段，用整宽判断）----------------
     near_bottom_ratio: float = 0.20
-    near_min_line_rows: int = 8      # 近段至少这么多行有线，才认为"脚下还有线"
+    near_min_line_rows: int = 5      # 近段至少这么多行有线，才认为"脚下还有线"
     # 近段黑线重心必须落在中间（偏离中心超过这个比例就不算），防止线偏到边上时误判
     require_near_centered: bool = True
     near_center_tolerance_ratio: float = 0.18
