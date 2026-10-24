@@ -120,8 +120,125 @@ class StripeCountResult:
     zebra_exists: bool
     dominant_angle_deg: float
     debug_image: BgrImage
+    layout_ok: bool = False
+    layout_reason: str = ""
+    axis_spread_deg: float = 0.0
+    angle_std_deg: float = 0.0
+    band_width_ratio: float = 0.0
+    spacing_cv: float = 0.0
+    curvature_gain: float = 0.0
+
+@dataclass(frozen=True)
+class StripeLayoutConfig:
+    min_aspect_ratio: float = 1.4
+    max_aspect_ratio: float = 8.0
+    min_long_side_ratio: float = 0.18
+    min_short_side_ratio: float = 0.012
+    max_vertical_deviation_deg: float = 30.0
+    max_angle_std_deg: float = 9.0
+    # 斑马线条纹并排：长轴与“中心连线方向”接近垂直；圆环虚线串联：接近平行
+    min_axis_spread_deg: float = 55.0
+    min_band_width_ratio: float = 0.30
+    max_spacing_cv: float = 0.60
+    max_curvature_gain: float = 0.45
+    max_line_rms_ratio: float = 0.08
+
+
+@dataclass
+class StripeLayoutResult:
+    ok: bool
+    reason: str
+    axis_spread_deg: float = 0.0
+    angle_std_deg: float = 0.0
+    band_width_ratio: float = 0.0
+    spacing_cv: float = 0.0
+    curvature_gain: float = 0.0
 
 ###################################################################函数
+
+def _axial_mean_deg(angles):
+    z = np.mean(np.exp(1j * np.deg2rad(2.0 * np.asarray(angles, dtype=np.float64))))
+    return float(0.5 * np.rad2deg(np.angle(z)))
+
+
+def _axial_diff_deg(a, b):
+    return abs(((a - b + 90.0) % 180.0) - 90.0)
+
+
+def _axial_std_deg(angles):
+    z = np.mean(np.exp(1j * np.deg2rad(2.0 * np.asarray(angles, dtype=np.float64))))
+    r = min(1.0, max(1e-9, abs(z)))
+    return float(0.5 * np.rad2deg(np.sqrt(max(0.0, -2.0 * np.log(r)))))
+
+
+def analyze_stripe_layout(metas, width, height, cfg):
+    """metas: [{'cx','cy','long','short','angle'}, ...]"""
+    n = len(metas)
+    if n < 3:
+        return StripeLayoutResult(False, "too_few_stripes")
+    centers = np.array([[m["cx"], m["cy"]] for m in metas], dtype=np.float64)
+    angles = np.array([m["angle"] for m in metas], dtype=np.float64)
+    mean = centers.mean(axis=0)
+    shifted = centers - mean
+    cov = np.cov(shifted.T)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    v = eigvecs[:, int(np.argmax(eigvals))]
+    spread = float(np.rad2deg(np.arctan2(v[1], v[0])))
+    spread = ((spread + 90.0) % 180.0) - 90.0
+    axis = _axial_mean_deg(angles)
+    axis_spread = _axial_diff_deg(axis, spread)
+    angle_std = _axial_std_deg(angles)
+
+    t = shifted @ v
+    order = np.argsort(t)
+    t_sorted = t[order]
+    band = float(t_sorted[-1] - t_sorted[0])
+    band_ratio = band / max(1.0, float(width))
+    spacing = np.diff(t_sorted)
+    spacing_cv = (
+        float(np.std(spacing) / max(1e-6, np.mean(spacing)))
+        if spacing.size > 1 else 0.0
+    )
+
+    normal = np.array([-v[1], v[0]])
+    u = shifted @ v
+    w = shifted @ normal
+    c1 = np.polyfit(u, w, 1)
+    rms1 = float(np.sqrt(np.mean((w - np.polyval(c1, u)) ** 2)))
+    if n >= 3:
+        c2 = np.polyfit(u, w, 2)
+        rms2 = float(np.sqrt(np.mean((w - np.polyval(c2, u)) ** 2)))
+    else:
+        rms2 = rms1
+    curvature_gain = (rms1 - rms2) / max(rms1, 1e-6)
+    line_rms_ratio = rms1 / max(band, 1e-6)
+
+    if angle_std > cfg.max_angle_std_deg:
+        return StripeLayoutResult(False, "angle_not_parallel", axis_spread,
+                                  angle_std, band_ratio, spacing_cv,
+                                  curvature_gain)
+    if axis_spread < cfg.min_axis_spread_deg:
+        return StripeLayoutResult(False, "serial_not_side_by_side", axis_spread,
+                                  angle_std, band_ratio, spacing_cv,
+                                  curvature_gain)
+    if band_ratio < cfg.min_band_width_ratio:
+        return StripeLayoutResult(False, "band_too_narrow", axis_spread,
+                                  angle_std, band_ratio, spacing_cv,
+                                  curvature_gain)
+    if spacing_cv > cfg.max_spacing_cv:
+        return StripeLayoutResult(False, "spacing_irregular", axis_spread,
+                                  angle_std, band_ratio, spacing_cv,
+                                  curvature_gain)
+    if curvature_gain > cfg.max_curvature_gain:
+        return StripeLayoutResult(False, "curved_chain", axis_spread,
+                                  angle_std, band_ratio, spacing_cv,
+                                  curvature_gain)
+    if line_rms_ratio > cfg.max_line_rms_ratio:
+        return StripeLayoutResult(False, "centers_not_collinear", axis_spread,
+                                  angle_std, band_ratio, spacing_cv,
+                                  curvature_gain)
+    return StripeLayoutResult(True, "zebra_layout", axis_spread, angle_std,
+                              band_ratio, spacing_cv, curvature_gain)
 
 def open_camera(
     device: str = "/dev/video0",
@@ -343,224 +460,118 @@ def count_black_stripes(
     track_mask: BinaryImage,
     minimum_stripe_count: int = 3,
     maximum_stripe_count: int = 10,
+    config: Optional[StripeLayoutConfig] = None,
 ) -> StripeCountResult:
-    """统计白底二值图中的倾斜黑色竖条。
-
-    处理方式：
-    1. 将黑色区域反转成白色候选；
-    2. 寻找各个黑色连通轮廓；
-    3. 用最小外接矩形检查面积、长宽比和方向；
-    4. 统计符合条件的细长黑色区域；
-    5. 检查这些区域是否大致平行。
-    """
-
+    cfg = config if config is not None else StripeLayoutConfig()
     height, width = track_mask.shape
     image_area = float(height * width)
 
-    # track_mask中黑条为0。
-    # findContours要求目标区域为255，因此将黑条提取为白色。
-    black_mask = cv2.inRange(
-        track_mask,
-        0,
-        127,
-    )
-
-    # 删除小型黑色噪点。
+    black_mask = cv2.inRange(track_mask, 0, 127)
     black_mask = cv2.morphologyEx(
-        black_mask,
-        cv2.MORPH_OPEN,
-        cv2.getStructuringElement(
-            cv2.MORPH_RECT,
-            (3, 3),
-        ),
+        black_mask, cv2.MORPH_OPEN,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
     )
-
-    # 连接黑条内部很小的断口。
     black_mask = cv2.morphologyEx(
-        black_mask,
-        cv2.MORPH_CLOSE,
-        cv2.getStructuringElement(
-            cv2.MORPH_RECT,
-            (3, 5),
-        ),
+        black_mask, cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 5)),
     )
-
-    # 显示统一由 main() 负责，算法函数内不调用 imshow()。
-    
     contours, _ = cv2.findContours(
-        black_mask,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE,
+        black_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
-
     raw_contour_count = len(contours)
 
     valid_rectangles = []
-    valid_angles: List[float] = []
-
+    valid_angles = []
+    metas = []
     for contour in contours:
         area = float(cv2.contourArea(contour))
-
-        # 删除小噪点。
-        if area < 0.001 * image_area:
+        if area < 0.001 * image_area or area > 0.20 * image_area:
             continue
-
-        # 删除过大的黑色区域，例如大块阴影或图像边界。
-        if area > 0.20 * image_area:
-            continue
-
-        angle, long_side, short_side = get_long_axis_angle(
-            contour
-        )
-
+        angle, long_side, short_side = get_long_axis_angle(contour)
         if short_side <= 1.0:
             continue
-
-        aspect_ratio = long_side / short_side
-
-        # 黑色斑马条纹应该是细长区域。
-        if aspect_ratio < 1.1:
+        aspect = long_side / short_side
+        if aspect < cfg.min_aspect_ratio or aspect > cfg.max_aspect_ratio:
             continue
-
-        # 条纹长度至少达到图像高度的20%。
-        if long_side < 0.14 * height:
+        if long_side < cfg.min_long_side_ratio * height:
             continue
-
-        # 当前场景中条纹总体上是竖直的，但允许较大倾斜。
-        # 竖直方向对应约+90°或-90°。
-        vertical_deviation = abs(
-            abs(angle) - 90.0
-        )
-
-        if vertical_deviation > 30.0:
+        if short_side < cfg.min_short_side_ratio * width:
             continue
-
+        vertical_deviation = abs(abs(angle) - 90.0)
+        if vertical_deviation > cfg.max_vertical_deviation_deg:
+            continue
         rectangle = cv2.minAreaRect(contour)
-        box = cv2.boxPoints(rectangle)
-        box = np.int32(np.round(box))
-
+        box = np.int32(np.round(cv2.boxPoints(rectangle)))
         valid_rectangles.append(box)
         valid_angles.append(angle)
+        metas.append({
+            "cx": float(np.mean(box[:, 0])),
+            "cy": float(np.mean(box[:, 1])),
+            "long": float(long_side),
+            "short": float(short_side),
+            "angle": float(angle),
+        })
 
     stripe_count = len(valid_rectangles)
-
-    # 检查所有候选条纹是否大致平行。
     dominant_angle = 0.0
     parallel = True
-
     if valid_angles:
-        angles_array = np.asarray(
-            valid_angles,
-            dtype=np.float32,
-        )
-
-        # 条纹方向具有180°等价性，因此使用双角平均。
-        doubled_angles = np.deg2rad(
-            angles_array * 2.0
-        )
-
+        angles_array = np.asarray(valid_angles, dtype=np.float32)
+        doubled = np.deg2rad(angles_array * 2.0)
         dominant_angle = 0.5 * np.rad2deg(
-            np.arctan2(
-                np.mean(np.sin(doubled_angles)),
-                np.mean(np.cos(doubled_angles)),
-            )
+            np.arctan2(np.mean(np.sin(doubled)), np.mean(np.cos(doubled)))
         )
-
-        # 计算每条线与主方向之间的最小夹角。
-        angle_differences = np.abs(
-            (
-                angles_array
-                - dominant_angle
-                + 90.0
-            )
-            % 180.0
-            - 90.0
+        differences = np.abs(
+            (angles_array - dominant_angle + 90.0) % 180.0 - 90.0
         )
+        parallel = bool(np.max(differences) <= 15.0)
 
-        parallel = bool(
-            np.max(angle_differences) <= 15.0
-        )
-
-    # 第一版先使用简单判断：
-    # 至少3条、最多10条，并且所有候选条纹大致平行。
+    layout = analyze_stripe_layout(metas, width, height, cfg)
     zebra_exists = (
-        minimum_stripe_count
-        <= stripe_count
-        <= maximum_stripe_count
+        minimum_stripe_count <= stripe_count <= maximum_stripe_count
         and parallel
+        and layout.ok
     )
 
-    # 灰度二值图不能直接画彩色文字，因此先转成BGR。
-    debug_image = cv2.cvtColor(
-        track_mask,
-        cv2.COLOR_GRAY2BGR,
-    )
-
-    # 用红色外接矩形标出统计到的黑色条纹。
+    debug_image = cv2.cvtColor(track_mask, cv2.COLOR_GRAY2BGR)
     for index, box in enumerate(valid_rectangles):
-        cv2.polylines(
-            debug_image,
-            [box],
-            isClosed=True,
-            color=(0, 0, 255),  # BGR红色
-            thickness=2,
-        )
-
+        cv2.polylines(debug_image, [box], True, (0, 0, 255), 2)
         center_x = int(np.mean(box[:, 0]))
         center_y = int(np.mean(box[:, 1]))
-
-        cv2.putText(
-            debug_image,
-            str(index + 1),
-            (center_x, center_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 0, 255),
-            2,
-            cv2.LINE_AA,
-        )
-
-    # 先画黑色背景条，保证红字在白色背景中清晰可见。
-    cv2.rectangle(
-        debug_image,
-        (0, 0),
-        (width - 1, 58),
-        (0, 0, 0),
-        thickness=cv2.FILLED,
+        cv2.putText(debug_image, str(index + 1), (center_x, center_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2, cv2.LINE_AA)
+    cv2.rectangle(debug_image, (0, 0), (width - 1, 84), (0, 0, 0), cv2.FILLED)
+    cv2.putText(
+        debug_image, "RAW: %d  VALID: %d" % (raw_contour_count, stripe_count),
+        (8, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (0, 0, 255), 2, cv2.LINE_AA,
     )
-
-    # OpenCV内置字体不支持中文，使用英文避免乱码。
     cv2.putText(
         debug_image,
-        f"RAW: {raw_contour_count}  VALID: {stripe_count}",
-        (8, 23),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.58,
-        (0, 0, 255),  # 红色
-        2,
-        cv2.LINE_AA,
+        "ZEBRA: %s  ANGLE: %+.1f" % ("YES" if zebra_exists else "NO",
+                                      dominant_angle),
+        (8, 47), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 0, 255), 2, cv2.LINE_AA,
     )
-
     cv2.putText(
         debug_image,
-        (
-            f"ZEBRA: {'YES' if zebra_exists else 'NO'}  "
-            f"ANGLE: {dominant_angle:+.1f}"
+        "layout=%s spread=%.0f std=%.0f band=%.2f cv=%.2f curve=%.2f" % (
+            layout.reason, layout.axis_spread_deg, layout.angle_std_deg,
+            layout.band_width_ratio, layout.spacing_cv, layout.curvature_gain,
         ),
-        (8, 49),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.52,
-        (0, 0, 255),  # 红色
-        2,
-        cv2.LINE_AA,
+        (8, 74), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (0, 255, 255), 1, cv2.LINE_AA,
     )
-
     return StripeCountResult(
-    raw_contour_count=raw_contour_count,
-    stripe_count=stripe_count,
-    zebra_exists=zebra_exists,
-    dominant_angle_deg=float(dominant_angle),
-    debug_image=debug_image,
+        raw_contour_count=raw_contour_count,
+        stripe_count=stripe_count,
+        zebra_exists=bool(zebra_exists),
+        dominant_angle_deg=float(dominant_angle),
+        debug_image=debug_image,
+        layout_ok=bool(layout.ok),
+        layout_reason=layout.reason,
+        axis_spread_deg=float(layout.axis_spread_deg),
+        angle_std_deg=float(layout.angle_std_deg),
+        band_width_ratio=float(layout.band_width_ratio),
+        spacing_cv=float(layout.spacing_cv),
+        curvature_gain=float(layout.curvature_gain),
     )
 
 def _create_ros_publisher():

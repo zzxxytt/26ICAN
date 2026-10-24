@@ -14,6 +14,7 @@ install(PROGRAMS
   scripts/step_detector.py
   scripts/roundabout.py
   scripts/icn.py   
+  scripts/track_phase.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

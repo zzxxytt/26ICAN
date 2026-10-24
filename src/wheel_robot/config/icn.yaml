@@ -1,6 +1,36 @@
 # 顶层 key 必须是 line_follower：icn.py 继承的父类把节点名写死成 "line_follower"
 line_follower:
   ros__parameters:
+    # ================= 赛道阶段 =================
+    track_phase.start_phase: "FIRST_CORNER"
+    track_phase.debug_blocked_detectors: true
+
+    # 首弯结束：实测转向进度 + 连续直线
+    track_phase.corner_error_threshold: 0.30
+    track_phase.corner_min_peak_error: 0.55
+    track_phase.corner_min_turn: 0.30
+    track_phase.straight_error_max: 0.12
+    track_phase.straight_min_confidence: 0.55
+    track_phase.straight_confirm_frames: 12
+    track_phase.first_corner_timeout_seconds: 0.0
+
+    # 平台通过：动作结束后再做视觉确认
+    track_phase.platform_settle_seconds: 0.30
+    track_phase.platform_clear_frames: 10
+    track_phase.platform_clear_min_confidence: 0.55
+    track_phase.platform_clear_error_max: 0.20
+
+    # 圆环
+    track_phase.roundabout_min_seconds: 1.0
+    track_phase.roundabout_clear_frames: 8
+
+    # 下一圈
+    track_phase.lap_restart_clear_frames: 8
+
+    # ================= 元素触发上下文 =================
+    step_trigger_max_error: 0.35
+    zebra_trigger_max_error: 0.40
+
     # 圆环：从下方切线向右上进入，逆时针一圈后沿切线退出。
     # observe 只画调试信息；control 才接管；off 保持原巡线。
     roundabout_mode: "observe"
@@ -70,14 +100,26 @@ line_follower:
     zebra_confirm_frames: 2
     zebra_release_frames: 3
 
-    zebra_approach_slowdown: 0.50
+    zebra_approach_slowdown: 0.20
     zebra_stop_seconds: 3.0
-    zebra_cross_speed: 0.35
+    zebra_cross_speed: 0.30
     zebra_cross_min_seconds: 4.0
     zebra_cross_max_seconds: 8.0
     zebra_cooldown_seconds: 1.0
     zebra_exit_grace_frames: 8
     zebra_target_count: 2
+    # ---------------- 斑马线整体排列 ----------------
+    zebra_min_aspect_ratio: 1.4
+    zebra_max_aspect_ratio: 8.0
+    zebra_min_long_side_ratio: 0.18
+    zebra_min_short_side_ratio: 0.012
+    zebra_max_vertical_deviation_deg: 30.0
+    zebra_max_angle_std_deg: 9.0
+    zebra_min_axis_spread_deg: 55.0
+    zebra_min_band_width_ratio: 0.30
+    zebra_max_spacing_cv: 0.60
+    zebra_max_curvature_gain: 0.45
+    zebra_max_line_rms_ratio: 0.08
 
     # ---------------- 台阶 ----------------
     step_enabled: true
@@ -91,6 +133,28 @@ line_follower:
     step_cooldown_seconds: 2.0
     step_exit_grace_frames: 10
 
+    # ---------------- 台阶：弯道排除/前缘/一致性 ----------------
+    step_platform_value_min: 95
+    step_platform_saturation_max: 150
+    step_wood_hue_min: 5
+    step_wood_hue_max: 35
+    step_wood_saturation_min: 35
+    step_gap_surface_min: 0.50
+    step_curve_min_rows: 8
+    step_curve_max_dx_per_row: 0.10
+    step_curve_min_dx: 0.18
+    step_curve_min_support: 0.55
+    step_curve_min_width_ratio: 0.006
+    step_curve_max_width_ratio: 0.10
+    step_edge_gradient_min: 25
+    step_edge_min_width_ratio: 0.45
+    step_edge_max_offset_rows: 30
+    step_edge_row_tolerance: 10
+    step_require_edge: true
+    step_track_confirm_frames: 4
+    step_track_max_frame_gap: 0.30
+    step_track_edge_row_range: 8
+    step_track_lateral_range: 0.10
     # 左中右：只检测 ROI 水平方向 30%~70% 这条中心列带
     step_center_left_ratio: 0.30
     step_center_right_ratio: 0.70
