@@ -1,0 +1,7 @@
+# ROS/Linux scripts must retain LF even on Windows with core.autocrlf=true.
+src/wheel_robot/**/*.py text eol=lf
+src/wheel_robot/**/*.sh text eol=lf
+src/wheel_robot/**/*.yaml text eol=lf
+src/wheel_robot/**/*.md text eol=lf
+src/wheel_robot/CMakeLists.txt text eol=lf
+src/wheel_robot/package.xml text eol=lf

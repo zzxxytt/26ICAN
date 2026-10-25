@@ -1,5 +1,30 @@
 # 下方切线进入、逆时针一圈、沿切线退出
 
+## Linux 启动报 `python3\r` 的处理
+
+`/usr/bin/env: ‘python3\r’: No such file or directory` 表示脚本第一行用了 CRLF 换行，Linux 将回车当成解释器名称的一部分。程序尚未执行，不属于摄像头或巡线检测失败；colcon 构建成功也不会自动修正换行。
+
+仓库已通过根目录 `.gitattributes` 将 wheel_robot 的 Python、Shell 和配置等文本固定为 LF。替换包也按 LF 导出并逐文件检查。如果板子上已经有 CRLF 文件，可在工作空间根目录执行以下修复；只替换换行字节，保留现有参数和程序内容，同时处理可能残留的安装副本：
+
+```bash
+cd ~/wheel_robot
+python3 - <<'PY'
+from pathlib import Path
+for root in (Path('src/wheel_robot'), Path('install/wheel_robot/lib/wheel_robot')):
+    for path in root.rglob('*'):
+        if path.is_file() and path.suffix in ('.py', '.sh'):
+            data = path.read_bytes()
+            if b'\r\n' in data:
+                path.write_bytes(data.replace(b'\r\n', b'\n'))
+                print('LF:', path)
+PY
+colcon build --packages-select wheel_robot --symlink-install
+source install/setup.bash
+ros2 launch wheel_robot line_follow.launch.py enable_motion:=true
+```
+
+单独巡线验证结束后，先退出该节点，再启动 ICN。仓库内的屏幕入口为 `bash src/wheel_robot/scripts/run_icn_on_screen.sh`，实际启动 `icn.launch.py`；仓库没有名为 `icn.sh` 的文件，板子上的同名包装脚本需另外核对。两个入口都依赖 `line_follower.py`。启动日志应包含 `near_continuity=on` 和实际 `source` 路径，新版 STOP 日志应带 `mask/picked`；仅修复换行不会把板子上的旧算法升级成新版本。
+
 ## 2026-10-25 巡线回归修复与阶段复核
 
 此节以现场调参快照 `b717ae5` 为修复前版本，阶段实现为 `52e6ad3`。当前修复先恢复基础巡线；下述阶段风险仍需处理，不代表整圈比赛已经验证。
