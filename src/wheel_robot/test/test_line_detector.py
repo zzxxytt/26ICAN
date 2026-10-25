@@ -167,6 +167,58 @@ class LineDetectorTest(unittest.TestCase):
         self.assertAlmostEqual(LineFollower._approach(0.0, -0.40, 0.08), -0.08)
 
 
+class FieldLineRegressionTest(unittest.TestCase):
+    """Straight tape can exceed the row-width window, not just a tight turn."""
+    def setUp(self):
+        self.detector = make_detector()
+        self.detector.search_top_ratio = 0.56
+        self.detector.min_line_width_ratio = 0.020
+        self.detector.max_line_width_ratio = 0.060
+        self.detector.expected_line_width_ratio = 0.032
+        self.detector.max_row_center_jump_ratio = 0.05
+        self.detector.min_valid_row_fraction = 0.35
+        self.detector.min_confidence = 0.45
+        self.detector.band_split_near = 0.20
+        self.detector.band_weight_near = 0.30
+        self.detector.band_weight_mid = 0.45
+        self.detector.band_weight_far = 0.25
+        self.detector.band_gate_far = 0.27
+        self.seed = np.full((480, 640, 3), 220, np.uint8)
+        cv2.rectangle(self.seed, (310, 0), (329, 479), (10, 10, 10), -1)
+
+    def wide_frame(self):
+        frame = np.full_like(self.seed, 220)
+        cv2.rectangle(frame, (299, 0), (340, 479), (10, 10, 10), -1)
+        return frame
+
+    def test_straight_tape_width_increase_keeps_tracking(self):
+        self.assertTrue(self.detector.detect(self.seed).valid)
+        result = self.detector.detect(self.wide_frame())
+        self.assertTrue(result.valid, result.reason)
+        self.assertLess(abs(result.error), 0.02)
+        self.assertIn("mask=", self.detector.last_diagnostics)
+        self.assertIn("wide=42", self.detector.last_diagnostics)
+
+    def test_partial_width_transition_does_not_drop_row_coverage(self):
+        self.assertTrue(self.detector.detect(self.seed).valid)
+        frame = self.wide_frame()
+        frame[460:] = self.seed[460:]
+        result = self.detector.detect(frame)
+        self.assertTrue(result.valid, result.reason)
+        self.assertGreater(result.confidence, 0.75)
+
+    def test_blank_frame_remains_invalid_after_tracked_tape(self):
+        self.detector.detect(self.seed)
+        result = self.detector.detect(np.full_like(self.seed, 220))
+        self.assertFalse(result.valid)
+        self.assertIn("mask=0 picked=0", self.detector.last_diagnostics)
+
+    def test_unassociated_wide_region_does_not_bootstrap_tracking(self):
+        result = self.detector.detect(self.wide_frame())
+        self.assertFalse(result.valid)
+        self.assertIn("picked=0", self.detector.last_diagnostics)
+
+
 def ring_path(curved=True):
     return RingPath(np.array([-0.34, 0.0, 0.5] if curved else [0.0, 0.0, 0.5]), 0.9, 5, 0.9)
 

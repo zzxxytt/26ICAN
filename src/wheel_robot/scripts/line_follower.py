@@ -458,6 +458,7 @@ class HsvStripLineDetector:
         )
 
     def detect(self, frame: np.ndarray) -> DetectionResult:
+        self.last_diagnostics = "empty_roi"
         debug = frame.copy()
         frame_height, frame_width = frame.shape[:2]
         x0 = int(frame_width * self.search_left_ratio)
@@ -486,7 +487,9 @@ class HsvStripLineDetector:
                 frame_width,
                 target_x,
                 max_jump,
-                allow_corner=False,
+                # Keep the established near-band continuity fallback. Disabling
+                # it also rejects straight tape that becomes wider in perspective.
+                allow_corner=(name == "near"),
                 reference_x=self._last_center_x,
             )
             for name, weight, width_scale, top_row, bottom_row in self._band_layout(
@@ -571,6 +574,17 @@ class HsvStripLineDetector:
             if band.selected is not None:
                 selected_full[band.top_row : band.bottom_row] = band.selected
 
+        raw_pixels = int(np.count_nonzero(mask))
+        picked_pixels = int(np.count_nonzero(selected_full))
+        self.last_diagnostics = (
+            f"mask={raw_pixels} picked={picked_pixels} "
+            + " ".join(
+                f"{b.name[0].upper()}={b.rows}/{b.band_rows}"
+                f"(wide={b.widest},ok={int(b.valid)})" for b in band_results
+            )
+            + f" cov={fused_coverage:.2f}"
+        )
+
         raw_overlay = np.zeros_like(roi)
         raw_overlay[:, :, 2] = mask
         debug[y0:y1, x0:x1] = cv2.addWeighted(
@@ -618,6 +632,7 @@ class HsvStripLineDetector:
                 debug,
                 f"{band.name} {band.rows}/{band.band_rows} "
                 f"w={band.picked_width} max={band.widest}"
+                f" keep<={band.max_width} ok={int(band.valid)}"
                 + (" H" if band.horizontal else "")
                 + (" C" if band.corner else ""),
                 (x0 + 4, bottom - 4),
@@ -646,6 +661,13 @@ class HsvStripLineDetector:
             )
 
         rows_by_name = {band.name: band.rows for band in band_results}
+        cv2.putText(
+            debug,
+            f"MASK pixels={raw_pixels} picked={picked_pixels} "
+            f"near width={max(2, int(roi_width*self.min_line_width_ratio))}..{near_band.max_width}px",
+            (max(8, x0), max(68, y0 - 54)),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 200, 255), 1, cv2.LINE_AA,
+        )
         cv2.putText(
             debug,
             f"HSV V<={int(self.hsv_upper[2])}+adaptive  "
@@ -847,6 +869,14 @@ class LineFollower(Node):
         )
         self.get_logger().info(
             f"物理前进方向映射: linear.x = {self.linear_direction_sign:+.0f} × 前进速度"
+        )
+        self.get_logger().info(
+            f"巡线配置 source={__file__} near_continuity=on "
+            f"ROI=({self.search_left_ratio:.2f},{self.search_top_ratio:.2f})"
+            f"..({self.search_right_ratio:.2f},{self.search_bottom_ratio:.2f}) "
+            f"V<={self.hsv_upper_v} adaptive={self.adaptive_value_enabled} "
+            f"width={self.min_line_width_ratio:.3f}..{self.max_line_width_ratio:.3f} "
+            f"coverage>={self.min_valid_row_fraction:.2f} confidence>={self.min_confidence:.2f}"
         )
 
     def _declare_parameters(self) -> None:
@@ -1349,7 +1379,8 @@ class LineFollower(Node):
             self._publish_zero(result.reason)
             self._show_debug(result, 0.0, 0.0, False)
             self._log_status(
-                now, f"STOP {result.reason}, confidence={result.confidence:.2f}"
+                now, f"STOP {result.reason}, confidence={result.confidence:.2f} "
+                + getattr(self.detector, "last_diagnostics", "")
             )
             return
 

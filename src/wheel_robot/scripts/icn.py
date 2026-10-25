@@ -865,12 +865,13 @@ class IcnNode(line_lib.LineFollower):
             self._show_debug(result, 0.0, 0.0, False)
             self._log_status(
                 now,
-                "STOP %s conf=%.2f phase=%s %s"
+                "STOP %s conf=%.2f phase=%s %s %s"
                 % (
                     result.reason,
                     result.confidence,
                     self._phase.describe(),
                     self._phase.evidence_text(),
+                    getattr(self.detector, "last_diagnostics", ""),
                 ),
             )
             return

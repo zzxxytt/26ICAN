@@ -97,7 +97,8 @@ line_follower:
     #                      认为该段是横向胶带（急弯）或横向砖缝，不作可信中心。
     band_gate_mid: 0.12
     band_gate_far: 0.27
-    sharp_curve_width_ratio: 999.0
+    # 此项是横向干扰判定阈值，不是线宽上限；999 不会放宽 max_line_width_ratio。
+    sharp_curve_width_ratio: 2.5
 
     # 急弯"原地转"：
     # corner_gate_ratio —— 横向段必须盖住上一帧中心 ±(画面宽×该比例) 才认作"同一条线拐弯"，
