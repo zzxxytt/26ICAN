@@ -138,6 +138,7 @@ class Observation:
     reason: str = "no_paths"
     debug: Optional[np.ndarray] = None
     inverse: Optional[np.ndarray] = None
+    entry: dict = field(default_factory=dict)  # Diagnostics only; never a control gate.
 
 
 class Vision:
@@ -187,14 +188,49 @@ class Vision:
         else:
             obs.arc = max(arcs, key=lambda p: p.confidence, default=None)
             obs.tangent = max(tangents, key=lambda p: p.confidence, default=None)
+        # Expose the exact existing gates without relaxing them or changing paths.
+        supported_tangents = [p for p in tangents if p.dashes >= 2 and p.supports(0.8)]
+        near_pairs = [(a, s) for a in arcs for s in supported_tangents
+                      if a is not s and abs(a.x(0.10)-s.x(0.10)) < 0.16]
+        reject = ("OK" if pairs else "NO_PATHS" if not paths else
+                  "NO_ARC" if not arcs else "NO_TANGENT" if not tangents else
+                  "TANGENT_SUPPORT" if not supported_tangents else
+                  "NEAR_GAP" if not near_pairs else "FAR_SEPARATION")
+        path_details = []
+        for p in paths:
+            arc_fail = [name for name, passed in (
+                ("dash", p.dashes >= 3), ("reach", p.supports(0.8)),
+                ("bend", p.bend*c.image_turn_sign > 0.10),
+                ("dir", (p.x(0.85)-p.x(0.15))*c.image_turn_sign > 0.06)) if not passed]
+            tangent_fail = [name for name, passed in (
+                ("bend", abs(p.bend) < 0.16), ("heading", abs(p.heading) < 0.30)) if not passed]
+            path_details.append({"dashes": int(p.dashes), "confidence": float(p.confidence),
+                                 "bend": p.bend, "heading": p.heading,
+                                 "reach": bool(p.supports(0.8)),
+                                 "support": ([float(p.points[0, 0]), float(p.points[-1, 0])]
+                                             if len(p.points) else None),
+                                 "arc_fail": arc_fail, "tangent_fail": tangent_fail})
+        obs.entry = {"reject": reject, "arcs": len(arcs), "tangents": len(tangents),
+                     "supported_tangents": len(supported_tangents),
+                     "near_pairs": len(near_pairs), "pairs": len(pairs), "paths": path_details}
         obs.reason = "junction" if obs.junction else ("paths" if paths else "no_paths")
         for index, path in enumerate(paths):
-            t = np.linspace(0.03, 0.95, 50)
+            # Draw observed support, not a full-height extrapolation that can
+            # make a shared-dash hypothesis look like an extra physical branch.
+            lo, hi = (path.points[0, 0], path.points[-1, 0]) if len(path.points) else (0.03, 0.95)
+            t = np.linspace(lo, hi, 50)
             xy = np.column_stack((path.x(t)*c.work_width, (1-t)*(c.work_height-1))).astype(np.int32)
-            cv2.polylines(obs.debug, [xy], False, (0, 180, 255), 1)
-            cv2.putText(obs.debug, f"{index}:{path.confidence:.2f}/{path.dashes}",
+            role = "A" if path is obs.arc else "T" if path is obs.tangent else "?"
+            color = (0, 220, 0) if role == "A" else (255, 220, 0) if role == "T" else (140, 140, 140)
+            cv2.polylines(obs.debug, [xy], False, color, 2 if role != "?" else 1)
+            for pt, px in path.points[::3]:
+                cv2.circle(obs.debug, (int(px*c.work_width), int((1-pt)*(c.work_height-1))), 1, color, -1)
+            detail = path_details[index]
+            arc_text = "+".join(detail["arc_fail"]) or "OK"
+            tangent_text = "+".join(detail["tangent_fail"]) or "OK"
+            cv2.putText(obs.debug, f"P{index}/{role} d={path.dashes} A:{arc_text} T:{tangent_text}",
                         (6, 14+index*16),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 150, 0), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.30, color, 1)
         return obs
 
     def _trace(self, mask, labels, stats):
@@ -671,13 +707,16 @@ class RoundaboutAdapter:
                  f"complete={m.completed} abort={m.aborted}",
                  f"exit_hits={m.exit_hits}/{c.exit_confirm_frames} clear={m.clear}",
                  f"{self.elapsed_ms:.1f} ms  predict={int(self.decision.predicted)}",
-                 self.failed or self.decision.reason or m.reason]
+                 self.failed or self.decision.reason or m.reason,
+                 "entry="+obs.entry.get("reject", obs.reason),
+                 f"A={obs.entry.get('arcs', 0)} T={obs.entry.get('tangents', 0)} "
+                 f"near_pairs={obs.entry.get('near_pairs', 0)}"]
         for i, line in enumerate(lines):
             cv2.putText(panel, line[:48], (8, 20+i*22), cv2.FONT_HERSHEY_SIMPLEX, 0.43,
                         (0, 210, 255) if i == 0 else (220, 220, 220), 1, cv2.LINE_AA)
-        if obs.debug is not None and h > 230:
-            ph = min(h-220, 200)
-            panel[215:215+ph, 10:330] = cv2.resize(obs.debug, (320, ph))
+        if obs.debug is not None and h > 270:
+            ph = min(h-265, 200)
+            panel[260:260+ph, 10:330] = cv2.resize(obs.debug, (320, ph))
         # Assigned by process below; no resize of source pixels before control.
         self.panel = panel
 
@@ -691,6 +730,7 @@ class RoundaboutAdapter:
                                "owns_control": self.owns_control, "reason": self.failed or self.decision.reason,
                                "yaw_degrees": round(m.degrees, 1), "paths": len(self.observation.paths),
                                "junction": self.observation.junction, "completed": m.completed,
+                               "entry": self.observation.entry,
                                "aborted": m.aborted, "predicted": self.decision.predicted,
                                "processing_ms": round(self.elapsed_ms, 1)})
         self.status_pub.publish(msg)

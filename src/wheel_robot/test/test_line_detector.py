@@ -320,6 +320,47 @@ def ring_view(curved=True, straight=True, dashed=True):
 
 
 class RoundaboutVisionTest(unittest.TestCase):
+    def inspect_paths(self, paths):
+        vision = Vision(Config(adaptive=False))
+        with patch.object(vision, "_trace", return_value=paths):
+            return vision.detect(np.full((480, 640, 3), 220, np.uint8))
+
+    def test_reverse_bending_third_hypothesis_is_not_the_entry_arc(self):
+        arc, tangent = ring_path(), ring_path(False)
+        mixed = RingPath(np.array([0.32, -0.32, 0.5]), 0.99, 5, 0.9)
+        obs = self.inspect_paths([mixed, tangent, arc])
+        self.assertTrue(obs.junction)
+        self.assertIs(obs.arc, arc)
+        self.assertIs(obs.tangent, tangent)
+        self.assertIn("bend", obs.entry["paths"][0]["arc_fail"])
+        self.assertEqual(obs.entry["reject"], "OK")
+
+    def test_straight_left_branch_reports_missing_curvature(self):
+        left = RingPath(np.array([0.0, -0.35, 0.5]), 0.95, 4, 0.9)
+        obs = self.inspect_paths([left, ring_path(False)])
+        self.assertFalse(obs.junction)
+        self.assertEqual(obs.entry["reject"], "NO_ARC")
+        self.assertEqual(obs.entry["paths"][0]["arc_fail"], ["bend"])
+        self.assertIn("heading", obs.entry["paths"][0]["tangent_fail"])
+
+    def test_arc_dash_and_reach_failures_are_visible(self):
+        arc = ring_path()
+        arc.dashes = 2
+        arc.points = np.array([[0.1, 0.5], [0.6, 0.38]])
+        obs = self.inspect_paths([arc, ring_path(False)])
+        self.assertFalse(obs.junction)
+        self.assertEqual(obs.entry["paths"][0]["arc_fail"], ["dash", "reach"])
+
+    def test_pair_near_gap_and_far_separation_have_distinct_reasons(self):
+        arc = ring_path()
+        arc.coefficients[2] = 0.25
+        obs = self.inspect_paths([arc, ring_path(False)])
+        self.assertEqual(obs.entry["reject"], "NEAR_GAP")
+        arc = RingPath(np.array([-0.12, 0.0, 0.5]), 0.95, 4, 0.9)
+        tangent = RingPath(np.array([0.0, 0.0, 0.47]), 0.95, 4, 0.9)
+        obs = self.inspect_paths([arc, tangent])
+        self.assertEqual(obs.entry["reject"], "FAR_SEPARATION")
+
     def test_dashed_junction_keeps_arc_and_tangent_separate(self):
         obs = Vision(Config(adaptive=False)).detect(ring_view())
         self.assertTrue(obs.junction, [(p.coefficients.tolist(), p.dashes) for p in obs.paths])
