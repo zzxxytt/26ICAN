@@ -59,9 +59,11 @@ line_follower:
 
     # 在求矩之前按胶带宽度逐行筛选，排除细竖砖缝和横向砖缝。
     min_line_width_ratio: 0.020
-    max_line_width_ratio: 0.060
-    expected_line_width_ratio: 0.032
-    width_tolerance_ratio: 0.020
+    # 现场 HUD 实测最宽 N/M/F 约 46/42/35px；旧上限 36/26/19px 会拒绝整条线。
+    # 640px 图、ROI 宽 615px 时，上限约 55/49/43px，支持无历史的冷启动。
+    max_line_width_ratio: 0.090
+    expected_line_width_ratio: 0.065
+    width_tolerance_ratio: 0.035
     # 0.20 意味着每行允许跳 123px，等于允许在暗条之间来回换目标（红点乱跳的主因）
     max_row_center_jump_ratio: 0.05
     min_valid_row_fraction: 0.35
@@ -87,8 +89,8 @@ line_follower:
 
     # 远段胶带在透视上更窄：mid/far 段的 min/max/expected/tolerance
     # 都乘以这两个系数。跑起来后看 HUD 的 "N/M/F" 行与宽度的差距再微调。
-    band_width_scale_mid: 0.72
-    band_width_scale_far: 0.52
+    band_width_scale_mid: 0.90
+    band_width_scale_far: 0.78
 
     # 防"急弯 / 地面缝隙骗走中远段"：
     # band_gate_mid/far —— 中/远段中心与近段中心的横向偏差超过"画面宽度 × 该比例"，

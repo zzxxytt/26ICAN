@@ -219,6 +219,87 @@ class FieldLineRegressionTest(unittest.TestCase):
         self.assertIn("picked=0", self.detector.last_diagnostics)
 
 
+class FieldWidthCalibrationTest(unittest.TestCase):
+    """Exercise the shipped ICN line parameters without a warm-up frame."""
+
+    def setUp(self):
+        import inspect
+        import yaml
+        config_dir = SCRIPTS_DIR.parent / "config"
+        params = {}
+        # Match icn.launch.py's parameter-file ordering.
+        for name in ("line_follower.yaml", "icn.yaml"):
+            params.update(yaml.safe_load((config_dir / name).read_text(
+                encoding="utf-8"))["line_follower"]["ros__parameters"])
+        kwargs = {}
+        for name in inspect.signature(HsvStripLineDetector).parameters:
+            if name in ("hsv_lower", "hsv_upper"):
+                kwargs[name] = tuple(params[name + "_" + c] for c in "hsv")
+            elif name == "morphology_kernel":
+                kwargs[name] = params["hsv_morphology_kernel"]
+            elif name in params:
+                kwargs[name] = params[name]
+        self.detector = HsvStripLineDetector(**kwargs)
+
+    @staticmethod
+    def perspective_tape(shift=0):
+        frame = np.full((480, 640, 3), 220, np.uint8)
+        # Approximate the screenshot's central tape, not its painted HUD.
+        for y in range(480):
+            width = int(np.interp(y, [268, 349, 430, 469], [29, 35, 42, 46]))
+            center = int(np.interp(y, [268, 469], [370, 384])) + shift
+            frame[y, center - width // 2:center - width // 2 + width] = 15
+        return frame
+
+    def test_field_widths_acquire_on_first_frame_without_corner(self):
+        result = self.detector.detect(self.perspective_tape())
+        self.assertTrue(result.valid, self.detector.last_diagnostics)
+        self.assertFalse(result.corner)
+        self.assertGreater(result.confidence, 0.80)
+        self.assertGreater(result.error, 0.13)
+        self.assertLess(result.error, 0.23)
+
+    def test_old_width_window_reproduces_cold_start_loss(self):
+        self.detector.max_line_width_ratio = 0.060
+        self.detector.expected_line_width_ratio = 0.032
+        self.detector.width_tolerance_ratio = 0.020
+        self.detector.band_width_scale_mid = 0.72
+        self.detector.band_width_scale_far = 0.52
+        self.assertFalse(self.detector.detect(self.perspective_tape()).valid)
+
+    def test_left_right_tape_has_correct_error_sign(self):
+        for shift, sign in ((-120, -1), (0, 1)):
+            with self.subTest(shift=shift):
+                self.detector._last_center_x = None
+                result = self.detector.detect(self.perspective_tape(shift))
+                self.assertTrue(result.valid)
+                self.assertGreater(sign * result.error, 0.10)
+
+    def test_previous_narrow_straight_still_acquires(self):
+        frame = np.full((480, 640, 3), 220, np.uint8)
+        frame[:, 310:330] = 15
+        result = self.detector.detect(frame)
+        self.assertTrue(result.valid)
+        self.assertLess(abs(result.error), 0.02)
+
+    def test_blank_after_tracking_stays_invalid(self):
+        self.assertTrue(self.detector.detect(self.perspective_tape()).valid)
+        self.assertFalse(self.detector.detect(np.full((480, 640, 3), 220, np.uint8)).valid)
+
+    def test_grout_horizontal_bar_and_floor_edge_do_not_acquire(self):
+        for kind in ("grout", "horizontal", "edge"):
+            with self.subTest(kind=kind):
+                self.detector._last_center_x = None
+                frame = np.full((480, 640, 3), 220, np.uint8)
+                if kind == "grout":
+                    frame[:, 319:322] = 15
+                elif kind == "horizontal":
+                    frame[440:460, :] = 15
+                else:
+                    frame[:, :180] = 15
+                self.assertFalse(self.detector.detect(frame).valid)
+
+
 def ring_path(curved=True):
     return RingPath(np.array([-0.34, 0.0, 0.5] if curved else [0.0, 0.0, 0.5]), 0.9, 5, 0.9)
 

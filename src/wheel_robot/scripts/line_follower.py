@@ -580,7 +580,7 @@ class HsvStripLineDetector:
             f"mask={raw_pixels} picked={picked_pixels} "
             + " ".join(
                 f"{b.name[0].upper()}={b.rows}/{b.band_rows}"
-                f"(wide={b.widest},ok={int(b.valid)})" for b in band_results
+                f"(wide={b.widest},keep<={b.max_width},ok={int(b.valid)})" for b in band_results
             )
             + f" cov={fused_coverage:.2f}"
         )
@@ -876,6 +876,7 @@ class LineFollower(Node):
             f"..({self.search_right_ratio:.2f},{self.search_bottom_ratio:.2f}) "
             f"V<={self.hsv_upper_v} adaptive={self.adaptive_value_enabled} "
             f"width={self.min_line_width_ratio:.3f}..{self.max_line_width_ratio:.3f} "
+            f"scale_M/F={self.band_width_scale_mid:.2f}/{self.band_width_scale_far:.2f} "
             f"coverage>={self.min_valid_row_fraction:.2f} confidence>={self.min_confidence:.2f}"
         )
 

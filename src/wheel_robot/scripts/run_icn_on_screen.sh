@@ -168,7 +168,7 @@ else
     fi
 fi
 
-# ---------- 5. 检查 install 里有没有 icn 的三件套 ----------
+# ---------- 5. 检查 ICN 和共用巡线的安装文件 ----------
 PKG_PREFIX="$(ros2 pkg prefix wheel_robot 2>/dev/null || true)"
 if [ -z "$PKG_PREFIX" ]; then
     echo "找不到 wheel_robot 包，先编译：" >&2
@@ -179,7 +179,9 @@ fi
 missing=0
 for f in \
     "$PKG_PREFIX/lib/wheel_robot/icn.py" \
+    "$PKG_PREFIX/lib/wheel_robot/line_follower.py" \
     "$PKG_PREFIX/share/wheel_robot/launch/icn.launch.py" \
+    "$PKG_PREFIX/share/wheel_robot/config/line_follower.yaml" \
     "$PKG_PREFIX/share/wheel_robot/config/icn.yaml"
 do
     if [ ! -f "$f" ]; then
@@ -198,6 +200,10 @@ if [ "$missing" = "1" ]; then
 EOF
     exit 1
 fi
+
+echo "ICN 程序   = $(readlink -f "$PKG_PREFIX/lib/wheel_robot/icn.py")"
+echo "巡线程序   = $(readlink -f "$PKG_PREFIX/lib/wheel_robot/line_follower.py")"
+echo "巡线参数   = $(readlink -f "$PKG_PREFIX/share/wheel_robot/config/line_follower.yaml")"
 
 # ---------- 6. 摄像头 / 旧进程 / 底盘检查 ----------
 stale=0
