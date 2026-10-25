@@ -486,7 +486,7 @@ class HsvStripLineDetector:
                 frame_width,
                 target_x,
                 max_jump,
-                allow_corner=(name == "near"),
+                allow_corner=False,
                 reference_x=self._last_center_x,
             )
             for name, weight, width_scale, top_row, bottom_row in self._band_layout(
