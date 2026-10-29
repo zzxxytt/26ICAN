@@ -961,11 +961,11 @@ class LineFollower(Node):
             # 近段丢失就不许动，避免只靠远处 15% 的趋势瞎打方向
             "band_require_near": True,
             # 单帧失效时保持上一帧指令的帧数，避免"抖一下就掉到 0"
-            "lost_hold_frames": 3,
+            "lost_hold_frames": 10,
             # 调试图叠加 40 行一条的行号网格，用来量"画面底部对应地面多远"
             "debug_row_grid": False,
             "forward_speed": 0.20,
-            "minimum_forward_speed": 0.08,
+            "minimum_forward_speed": 0.20,
             "linear_direction_sign": 1.0,
             "steering_kp": 1.00,
             "steering_kd": 0.025,

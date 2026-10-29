@@ -128,8 +128,8 @@ line_follower:
     step_jump_enabled: true    # 每圈确认台阶时请求一次跳跃；enable_motion=false 时不发送
     step_hold_seconds: 5.0      # 0 = 检测到就一直停；设 5.0 = 停 5 秒后继续
     step_stop_seconds: 1.0
-    step_climb_speed: 0.60
-    step_climb_seconds: 2.0
+    step_climb_speed: 0.20
+    step_climb_seconds: 1.0
     step_cooldown_seconds: 2.0
     step_exit_grace_frames: 10
 

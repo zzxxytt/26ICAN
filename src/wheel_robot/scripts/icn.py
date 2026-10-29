@@ -184,8 +184,8 @@ class IcnNode(line_lib.LineFollower):
             if name not in skip_step_fields
         }
         step_values.update(
-            top_ratio=0.40,
-            bottom_ratio=0.80,
+            top_ratio=0.70,
+            bottom_ratio=1.00,
             left_ratio=self.search_left_ratio,
             right_ratio=self.search_right_ratio,
             dark_value_max=self.hsv_upper_v,
@@ -335,6 +335,8 @@ class IcnNode(line_lib.LineFollower):
 
     # ============================================================ 阶段证据
     def _observe_phase_line(self, now: float, result) -> None:
+        if self.state is MissionState.FINISH:
+            return
         self._phase.observe_line(
             now=now,
             valid=bool(result.valid),
@@ -585,8 +587,19 @@ class IcnNode(line_lib.LineFollower):
         return 0.0, 0.0, False
 
     def _enter_finish(self, reason: str) -> None:
+        # 正常完成两圈后继续巡线；任务超时仍停车。
+        self._finish_keep_following = (
+            reason == "zebra_target_reached"
+        )
+
         self._set_state(MissionState.FINISH, reason)
-        self._publish_zero(reason)
+
+        if self._finish_keep_following:
+            self.get_logger().info(
+                "任务完成：两圈已结束"
+            )
+        else:
+            self._publish_zero(reason)
 
     @staticmethod
     def _error_within(result, limit: float) -> bool:
@@ -792,11 +805,16 @@ class IcnNode(line_lib.LineFollower):
         self._step_state(now, result)
 
         # 6) 输出
-        if self.state is MissionState.FINISH:
+        if (
+            self.state is MissionState.FINISH
+            and not self._finish_keep_following
+        ):
             self._publish_zero("mission_finish")
             self._show_debug(result, 0.0, 0.0, False)
-            self._log_status(now, "FINISH 任务完成，原地停车")
+            self._log_status(now, "FINISH 任务结束，停车")
             return
+
+        # 正常完成两圈时不 return，继续执行下面原有巡线代码。
 
         if self.state is MissionState.ZEBRA:
             elapsed = now - self._zebra_enter_time
@@ -899,7 +917,12 @@ class IcnNode(line_lib.LineFollower):
         self._show_debug(result, cmd_linear, cmd_angular, self.enable_motion)
         self._log_status(
             now,
+            (
+            "FINISH 任务完成 v=%.3f w=%+.3f err=%+.3f conf=%.2f phase=%s %s%s"
+            if self.state is MissionState.FINISH
+            else
             "LINE v=%.3f w=%+.3f err=%+.3f conf=%.2f phase=%s %s%s"
+            )
             % (
                 cmd_linear,
                 cmd_angular,

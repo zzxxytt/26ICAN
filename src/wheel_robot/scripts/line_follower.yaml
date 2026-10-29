@@ -1,0 +1,139 @@
+line_follower:
+  ros__parameters:
+    roundabout_mode: "off"  # 基础巡线默认旁路圆环，不加载圆环模块
+    # 直接发布可执行的 /cmd_vel（不再做架空 dry-run）。
+    # 想只识别不动车：ros2 launch ... enable_motion:=false，或这里改回 false。
+    # 车只在本帧"看过线且置信度达标"时才前进；丢线/低置信/相机超时都会立即发零。
+    enable_motion: true
+
+    # 斑马线检测是同目录下的另一个独立程序（zebra_crossing_detector.py），
+    # 与巡线不同时使用，默认关闭；关闭时不会 import 该模块，也不建 /zebra_crossing/* 话题。
+    # 需要时改成 true（模块缺失会自动关闭并只做巡线），阈值见代码里 zebra_* 参数。
+    enable_zebra: false
+
+    # 摄像头。v4l2 在本机实测可提供 640x480 @ 30 fps。
+    camera_backend: "v4l2"       # v4l2 或 auto
+    camera_id: 0                  # auto 后端使用
+    camera_device: "/dev/video0" # v4l2 后端使用
+    image_width: 640
+    image_height: 480
+    capture_frame_rate: 30.0
+    pixel_format: "YUYV"
+    rotation_degrees: 0
+    mirror_mode: "none"
+    camera_retry_seconds: 1.0
+    image_timeout_seconds: 0.35
+
+    # 正常控制保持在 10~20 Hz。
+    control_rate: 15.0
+    show_debug: true
+    # 车上的屏幕默认全屏：整幅 640x480 画面等比缩放到窗口内，两侧补黑边，不裁切。
+    # 在电脑上通过 X11 转发看图时改成 false，避免抢整个桌面。
+    debug_fullscreen: true
+    # manual ：按 wmctrl 报的窗口物理几何做画布，imshow 就是 1:1（默认，最可控）
+    # backend：原图交给 OpenCV 缩放（后端不缩放时会贴在左上角）
+    debug_scale_mode: "manual"
+    debug_window_name: "Black Line Follower (Q/Esc to stop)"
+
+    # 三段融合：ROI 从画面 56% 处一直到最底部（约 200 行），
+    # 内部再均分成 near / mid / far 三段，各自独立筛选后加权融合。
+    # 这样"贴线"仍由最底部的 near 段主导，far 段只提供弯道趋势。
+    search_top_ratio: 0.56
+    search_bottom_ratio: 0.98
+    search_left_ratio: 0.02
+    search_right_ratio: 0.98
+    hsv_lower_h: 0
+    hsv_lower_s: 0 
+    hsv_lower_v: 0
+    hsv_upper_h: 180
+    hsv_upper_s: 255
+    hsv_upper_v: 65
+
+    # 局部自适应阈值用于自动曝光变化、反光和阴影下的深色胶带。
+    adaptive_value_enabled: true
+    adaptive_block_size: 51
+    adaptive_c: 12.0
+    hsv_morphology_kernel: 3
+    erode_iterations: 1
+    dilate_iterations: 1
+
+    # 在求矩之前按胶带宽度逐行筛选，排除细竖砖缝和横向砖缝。
+    min_line_width_ratio: 0.020
+    # 现场 HUD 实测最宽 N/M/F 约 46/42/35px；旧上限 36/26/19px 会拒绝整条线。
+    # 640px 图、ROI 宽 615px 时，上限约 55/49/43px，支持无历史的冷启动。
+    max_line_width_ratio: 0.090
+    expected_line_width_ratio: 0.065
+    width_tolerance_ratio: 0.035
+    # 0.20 意味着每行允许跳 123px，等于允许在暗条之间来回换目标（红点乱跳的主因）
+    max_row_center_jump_ratio: 0.05
+    min_valid_row_fraction: 0.35
+    min_confidence: 0.45
+
+    # 线路部分出画面时，仅在靠近边缘且仍有连续胶带时低速大角度找回。
+    edge_recovery_min_row_fraction: 0.25
+    edge_recovery_min_confidence: 0.45
+    edge_recovery_error_threshold: 0.70
+    target_offset_pixels: 0.0
+
+    # 近/中/远三段融合权重（出厂 line_follower 用的就是 0.55/0.30/0.15）
+    # 近段丢失（band_require_near）就直接停车，不允许只靠远处趋势打方向。
+    band_weight_near: 0.30
+    band_weight_mid: 0.45
+    band_weight_far: 0.25
+    band_require_near: true
+
+    # 从 ROI 底部量起的占比：near 占最底 25%，mid 到 60%，其余 40% 给 far。
+    # 想让"近段"更贴脚下：调小 band_split_near；想更稳（行数更多）：调大。
+    band_split_near: 0.20
+    band_split_mid: 0.60
+
+    # 远段胶带在透视上更窄：mid/far 段的 min/max/expected/tolerance
+    # 都乘以这两个系数。跑起来后看 HUD 的 "N/M/F" 行与宽度的差距再微调。
+    band_width_scale_mid: 0.90
+    band_width_scale_far: 0.78
+
+    # 防"急弯 / 地面缝隙骗走中远段"：
+    # band_gate_mid/far —— 中/远段中心与近段中心的横向偏差超过"画面宽度 × 该比例"，
+    #                      判为锁错目标并作废（透视上越远允许越松）。
+    # sharp_curve_width_ratio —— 段内最宽暗色 run 超过本段 max_width 的这个倍数，
+    #                      认为该段是横向胶带（急弯）或横向砖缝，不作可信中心。
+    band_gate_mid: 0.12
+    band_gate_far: 0.27
+    # 此项是横向干扰判定阈值，不是线宽上限；999 不会放宽 max_line_width_ratio。
+    sharp_curve_width_ratio: 2.5
+
+    # 急弯"原地转"：
+    # corner_gate_ratio —— 横向段必须盖住上一帧中心 ±(画面宽×该比例) 才认作"同一条线拐弯"，
+    #                     否则视为地面缝隙/垫子边缘（不参与转向）。
+    # corner_angular_speed —— 急弯原地转向的角速度上限（比直道 max_angular_speed 大）。
+    # corner_hold_frames —— 横段消失后再保持几帧，防止在弯口反复抖动切换。
+    corner_gate_ratio: 0.18
+    corner_angular_speed: 1.00
+    corner_hold_frames: 0
+    # 急弯时的前进速度：不设 0，避免在弯口停死卡住（0.02 ≈ 3 cm/s）
+    corner_forward_speed: 0.20
+
+    # 调试图叠加每 40 行一条的行号网格：把地面距离和图像行号对上，
+    # 用来量"画面最底部那一行到底看多远"（本次"急弯提前进 ROI"就是它导致的）。
+    debug_row_grid: false
+
+    # 保守低速控制参数。误差为正表示黑线在图像右侧。
+    # 第一次在真车上跑运动模式，先按 0.12 m/s 走；稳了再逐步提到 0.20。
+    forward_speed: 0.20
+    minimum_forward_speed: 0.20
+
+    # 本机实测修正：linear.x 为正时机器人向物理前方行驶。
+    linear_direction_sign: 1.0
+    steering_kp: 1.40
+    steering_kd: 0.025
+    steering_sign: -1.0
+    max_angular_speed: 0.90
+
+    # 正常控制平滑加速；任何失效停车都会绕过斜坡立即归零。
+    max_linear_acceleration: 0.40
+    max_angular_acceleration: 1.80
+    max_error_derivative: 3.0
+    # 视觉抖动会直接进误差项，先加大低通
+    error_filter_alpha: 0.30
+    curve_slowdown: 0.60
+    status_log_period: 1.0

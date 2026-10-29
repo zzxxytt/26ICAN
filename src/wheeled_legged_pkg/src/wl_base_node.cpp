@@ -692,6 +692,7 @@ private:
 
   void timer3_callback()
   {
+    update_vision_jump();        // 更新视觉跳跃阶段
     geometry_msgs::msg::Twist m;
     m.linear.x = get_speed_decision(); // ← 前进 m/s
     m.angular.z = get_gyro_decision(); // ← 角速度 rad/s
@@ -702,6 +703,7 @@ private:
     msg.header.stamp = this->now();
     msg.name = {"joint_height", "joint_roll", "joint_pitching"};
     msg.position = get_pos_decision(); // 腿高(m), 横滚(deg), 俯仰(deg)
+    if (vision_jump_stage_ != 0)msg.position[2] = 0.0;  // 俯仰归零
     auto_pos_pub_->publish(msg);
     //detect_jump();
   }
@@ -1680,21 +1682,52 @@ private:
   rclcpp::TimerBase::SharedPtr jump_pulse_timer_;
   int is_jumped = 0;
 
+  // 新增：台阶跳跃阶段相关成员
+  // 0：正常姿态；1：调平等待；2：跳跃等待
+  int vision_jump_stage_ = 0;
+
+  std::chrono::steady_clock::time_point
+      vision_jump_start_;
+
+  void update_vision_jump()
+  {
+    if (vision_jump_stage_ == 0)
+      return;
+
+    const double elapsed =
+        std::chrono::duration<double>(
+            std::chrono::steady_clock::now() -
+            vision_jump_start_).count();
+
+    if (vision_jump_stage_ == 1 && elapsed >= 0.8)
+    {
+      // 已保持水平目标1.3秒，调用原来的跳跃函数。
+      request_jump();
+
+      vision_jump_stage_ = 2;
+      vision_jump_start_ =
+          std::chrono::steady_clock::now();
+    }
+    else if (vision_jump_stage_ == 2 && elapsed >= 0.3)
+    {
+      // 恢复 get_pos_decision() 原本返回的姿态。
+      vision_jump_stage_ = 0;
+    }
+  }
   // 新增视觉通道；原有函数和定时调用保持原样。
   // 回调只消费确认结果的上升沿，避免连续 true 导致重复起跳。
-  void vision_step_callback(const std_msgs::msg::Bool::SharedPtr msg)
+    void vision_step_callback(const std_msgs::msg::Bool::SharedPtr msg)
   {
-    const bool rising = msg->data && !vision_step_detected_;
+    const bool rising =msg->data && !vision_step_detected_;
+
     vision_step_detected_ = msg->data;
-    if (!rising)
+
+    // 当前动作未结束时，不重复启动。
+    if (!rising ||vision_jump_stage_ != 0 ||jump_pulse_active_)
       return;
-    if (jump_pulse_active_)
-    {
-      RCLCPP_WARN(this->get_logger(), "视觉台阶已确认，但跳跃脉冲正在执行，本次不重复触发");
-      return;
-    }
-    RCLCPP_INFO(this->get_logger(), "视觉台阶确认：调用 request_jump()");
-    request_jump();
+
+    vision_jump_stage_ = 1;
+    vision_jump_start_ =std::chrono::steady_clock::now();
   }
 
   bool vision_step_detected_ = false;

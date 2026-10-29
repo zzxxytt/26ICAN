@@ -69,32 +69,6 @@ struct Pid
             out = -out;
         return out;
     }
-
-    /**
-     * @brief 跑一次 PID
-     * @param target   目标值
-     * @param measure  当前测量值（必须和 target 同单位）
-     * @return         控制输出，已限幅在 ±outMax
-     */
-    float update_no_normalization(float target, float measure)
-    {
-        float error = target - measure;
-        // ---- 积分项 + 抗饱和 ----
-        integral += error;
-        if (integral >  iMax) integral =  iMax;
-        if (integral < -iMax) integral = -iMax;
-        // ---- 微分项 ----
-        float deriv = error - prevError;
-        prevError = error;
-        // ---- 三项求和 ----
-        float out = kp * error + ki * integral + kd * deriv;
-        // ---- 输出限幅 ----
-        if (out >  outMax) out =  outMax;
-        if (out < -outMax) out = -outMax;
-        if(reverse)
-            out = -out;
-        return out;
-    }
 };
 
 #endif  // PID_H

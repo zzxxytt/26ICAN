@@ -1,0 +1,146 @@
+# 顶层 key 必须是 line_follower：icn.py 继承的父类把节点名写死成 "line_follower"
+line_follower:
+  ros__parameters:
+    # ================= 赛道阶段 =================
+    track_phase.start_phase: "FIRST_CORNER"
+    track_phase.debug_blocked_detectors: true
+
+    # 首弯结束：实测转向进度 + 连续直线
+    track_phase.corner_error_threshold: 0.30
+    track_phase.corner_min_peak_error: 0.55
+    track_phase.corner_min_turn: 0.30
+    track_phase.straight_error_max: 0.20
+    track_phase.straight_min_confidence: 0.55
+    track_phase.straight_confirm_frames: 6
+    track_phase.first_corner_timeout_seconds: 0.0
+
+    # 平台通过：动作结束后再做视觉确认
+    track_phase.platform_settle_seconds: 0.20
+    track_phase.platform_clear_frames: 5
+    track_phase.platform_clear_min_confidence: 0.55
+    track_phase.platform_clear_error_max: 0.25
+
+    # 圆环
+    track_phase.roundabout_min_seconds: 1.0
+    track_phase.roundabout_clear_frames: 8
+
+    # 下一圈
+    track_phase.lap_restart_clear_frames: 8
+
+    # ================= 元素触发上下文 =================
+    zebra_trigger_max_error: 0.40
+
+    # 圆环：从下方切线向右上进入，逆时针一圈后沿切线退出。
+    # off 跳过圆环阶段，继续巡线找斑马线；observe 保留识别阶段但不接管；control 识别并接管。
+    # 默认读取此处；显式传入 roundabout_mode:=off/observe/control 才覆盖。
+    roundabout_mode: "off"
+    roundabout.heading_source: "imu"  # imu 或 odom；运行中不切换数据源
+    roundabout.imu_topic: "/imu/data"
+    roundabout.odom_topic: "/odom"
+    # 本仓库 wl_base_node.cpp 把 q0(w),q1(x),q2(y),q3(z) 写入 x,y,z,w。
+    # 使用标准 ROS IMU 驱动时必须改为 xyzw。
+    roundabout.imu_layout: "wxyz_in_xyzw"
+    roundabout.yaw_sign: 1.0
+    roundabout.image_turn_sign: -1  # 非镜像前视图：入环曲线向图像左侧弯
+    roundabout.roi_top: 0.42
+    roundabout.roi_bottom: 0.98
+    roundabout.roi_left: 0.02
+    roundabout.roi_right: 0.98
+    roundabout.black_max: 75
+    roundabout.adaptive: true
+    roundabout.perspective: false  # 未标定先不开；开启后需按实拍标定梯形
+    roundabout.top_left: 0.20
+    roundabout.top_right: 0.80
+    roundabout.bottom_left: 0.0
+    roundabout.bottom_right: 1.0
+    roundabout.min_width: 0.009
+    roundabout.max_width: 0.09
+    roundabout.max_gap: 0.24
+    roundabout.min_span: 0.48
+    roundabout.min_confidence: 0.50
+    roundabout.branch_separation: 0.08
+    roundabout.lookahead: 0.55
+    roundabout.max_track_jump: 0.16
+    roundabout.confirm_frames: 4
+    roundabout.exit_confirm_frames: 4
+    roundabout.recovery_frames: 8
+    roundabout.enter_speed: 0.08
+    roundabout.follow_speed: 0.12
+    roundabout.exit_speed: 0.08
+    roundabout.predict_speed: 0.05
+    roundabout.predict_seconds: 0.20
+    roundabout.predict_distance: 0.015
+    roundabout.enter_degrees: 35.0
+    roundabout.exit_min_degrees: 325.0
+    roundabout.exit_max_degrees: 395.0
+    roundabout.exit_heading_tolerance: 25.0
+    roundabout.entry_timeout: 8.0
+    roundabout.lap_timeout: 60.0
+    roundabout.exit_timeout: 6.0
+    roundabout.cooldown_seconds: 8.0
+    roundabout.rearm_clear_frames: 20
+    roundabout.sensor_timeout: 0.40
+    roundabout.max_tilt_degrees: 20.0
+    roundabout.max_processing_seconds: 0.15
+
+    # ---------------- 斑马线 ----------------
+    enable_zebra: true
+    zebra_decimate: 2
+
+    zebra_roi_top_ratio: 0.40
+    zebra_roi_bottom_ratio: 0.95
+    zebra_roi_left_ratio: 0.15
+    zebra_roi_right_ratio: 0.85
+    zebra_perspective_enabled: true
+
+    zebra_saturation_max: 75
+    zebra_value_min: 130
+    zebra_minimum_stripe_count: 3
+    zebra_maximum_stripe_count: 10
+    zebra_confirm_frames: 2
+    zebra_release_frames: 3
+
+    zebra_approach_slowdown: 0.20
+    zebra_stop_seconds: 3.0
+    zebra_cross_speed: 0.30
+    zebra_cross_min_seconds: 4.0
+    zebra_cross_max_seconds: 8.0
+    zebra_cooldown_seconds: 1.0
+    zebra_exit_grace_frames: 8
+    zebra_target_count: 2
+    # ---------------- 斑马线整体排列 ----------------
+    zebra_min_aspect_ratio: 1.4
+    zebra_max_aspect_ratio: 8.0
+    zebra_min_long_side_ratio: 0.18
+    zebra_min_short_side_ratio: 0.012
+    zebra_max_vertical_deviation_deg: 30.0
+    zebra_max_angle_std_deg: 9.0
+    zebra_min_axis_spread_deg: 55.0
+    zebra_min_band_width_ratio: 0.30
+    zebra_max_spacing_cv: 0.60
+    zebra_max_curvature_gain: 0.45
+    zebra_max_line_rms_ratio: 0.08
+
+    # ---------------- 台阶 ----------------
+    step_enabled: true
+    step_decimate: 2
+    step_action: "climb"
+    step_jump_enabled: true    # 每圈确认台阶时请求一次跳跃；enable_motion=false 时不发送
+    step_hold_seconds: 5.0      # 0 = 检测到就一直停；设 5.0 = 停 5 秒后继续
+    step_stop_seconds: 1.0
+    step_climb_speed: 0.60
+    step_climb_seconds: 2.0
+    step_cooldown_seconds: 2.0
+    step_exit_grace_frames: 10
+
+    # 台阶：只检查中心框内连续无黑线的行数（相对台阶 ROI）。
+    step_center_left_ratio: 0.30
+    step_center_right_ratio: 0.70
+    step_gap_top_ratio: 0.00
+    step_gap_bottom_ratio: 0.80
+    step_min_gap_rows: 10              # 连续至少 10 行无黑线即命中
+    step_min_dark_pixels_per_row: 5    # 每行 >=5 个黑像素算有线；设 1 为严格无黑点
+    step_track_confirm_frames: 1       # 一帧满足即可；可增大以过滤闪烁
+    step_track_max_frame_gap: 0.30
+
+    mission_timeout_seconds: 0.0

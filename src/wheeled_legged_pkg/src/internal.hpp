@@ -10,12 +10,18 @@
 #define FILE_PATH "/home/orangepi/wheel_robot/pt.bin"//要改别忘了
 #define DIS_PER_REC 4
 #define BEZIER_PREVIEW 8
+
 #define TUNNEL_LENGTH 15
-#define TUNNEL_IDX 125
-#define SSB_LENGTH 2500
-#define SSB_IDX 2500
-#define CROSSING_IDX 110
-#define STOP_KP 0.05f
+#define TUNNEL_IDX 2500 //2500禁用
+
+#define SSB_LENGTH 15 
+#define SSB_IDX 2500    //2500禁用
+
+#define CROSSING_IDX 500 
+
+#define STAIR_LENGTH 15
+#define STAIR_IDX 40
+
 
 
 typedef struct 
@@ -23,12 +29,6 @@ typedef struct
     float x;
     float y;
 } point_t;
-
-typedef struct 
-{
-    int ssb_idx;
-    int tunnel_idx;
-} spe_ele_idx_t;
 
 
 class Internal
@@ -46,21 +46,24 @@ private:
     int _ssb_idx;
     int _tunnel_idx;
     int _crossing_idx;
+    int _stair_idx;
     bool _stop_done;
     Pid pid_yaw;
     float convert2related_rad(float yaw);
     void add_point(point_t pt);
 public:
-    Internal(int ssb_idx, int crossing_idx, int tunnel_idx);
+    Internal(int ssb_idx, int crossing_idx, int tunnel_idx, int stair_idx);
     int pt_count=0;
     void init(float yaw_origin);
     int get_rec_idx(void);
     void set_ssb(void);
     void set_tunnel_idx(void);
     void set_crossing_idx(void);
+    void set_stair_idx(void);
     bool is_stop(void);
     bool is_ssb(void);
     bool is_tunnel(void);
+    bool is_stair(void);
     void update_pos(float yaw,float Speed,float DT);
     void print_pos_now(void);
     bool save_pt_list(const char* file);
@@ -77,8 +80,6 @@ public:
     void display_pos(void);
     bool idx_is_valid(int idx);
     float get_target_yaw();
-    point_t get_pos_now(void);
-    float get_dis_between_2pt(point_t pt1, point_t pt2);
 
 };
 

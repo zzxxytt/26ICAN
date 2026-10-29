@@ -16,11 +16,12 @@ float normalize_rad(float yaw)
     return yaw;
 }
 
-Internal::Internal(int ssb_idx, int crossing_idx, int tunnel_idx)
+Internal::Internal(int ssb_idx, int crossing_idx, int tunnel_idx, int stair_idx)
 {
     _ssb_idx = ssb_idx;
     _crossing_idx = crossing_idx;
     _tunnel_idx = tunnel_idx;
+    _stair_idx = stair_idx;
     _now_pos.x = 0;
     _now_pos.y = 0;
     _yaw_origin = 0;
@@ -104,6 +105,16 @@ void Internal::set_ssb(void)
 void Internal::set_tunnel_idx(void)
 {
     _tunnel_idx = _rec_idx;
+}
+
+void Internal::set_crossing_idx(void)
+{
+    _crossing_idx = _rec_idx;
+}
+
+void Internal::set_stair_idx(void)
+{
+    _stair_idx = _rec_idx;
 }
 
 float Internal::convert2related_rad(float yaw)
@@ -205,6 +216,19 @@ bool Internal::is_tunnel(void)
     }
 }
 
+bool Internal::is_stair(void)
+{
+    if (_dis_idx >= _stair_idx && _dis_idx < _stair_idx + STAIR_LENGTH)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }    
+
+}
+
 bool Internal::is_stop(void)
 {
     if(_dis_idx >= _crossing_idx && (!_stop_done))
@@ -229,16 +253,4 @@ void Internal::print_path(void)
     {
         std::cout << "x:" << _pt_list[i].x << " y:" << _pt_list[i].y << "\n";
     }
-}
-
-point_t Internal::get_pos_now(void)
-{
-    return _now_pos;
-}
-
-float Internal::get_dis_between_2pt(point_t pt1, point_t pt2)//根据y定正负 
-{
-    float delta_x = pt2.x - pt1.x;
-    float delta_y = pt2.y - pt1.y;
-    return std::sqrt(delta_x * delta_x + delta_y * delta_y)*((delta_y>=0)?1:-1);
 }
