@@ -111,7 +111,7 @@ line_follower:
     corner_angular_speed: 1.00
     corner_hold_frames: 0
     # 急弯时的前进速度：不设 0，避免在弯口停死卡住（0.02 ≈ 3 cm/s）
-    corner_forward_speed: 0.25
+    corner_forward_speed: 0.20
 
     # 调试图叠加每 40 行一条的行号网格：把地面距离和图像行号对上，
     # 用来量"画面最底部那一行到底看多远"（本次"急弯提前进 ROI"就是它导致的）。
@@ -119,8 +119,8 @@ line_follower:
 
     # 保守低速控制参数。误差为正表示黑线在图像右侧。
     # 第一次在真车上跑运动模式，先按 0.12 m/s 走；稳了再逐步提到 0.20。
-    forward_speed: 0.25
-    minimum_forward_speed: 0.25
+    forward_speed: 0.20
+    minimum_forward_speed: 0.20
 
     # 本机实测修正：linear.x 为正时机器人向物理前方行驶。
     linear_direction_sign: 1.0
@@ -130,7 +130,7 @@ line_follower:
     max_angular_speed: 0.90
 
     # 正常控制平滑加速；任何失效停车都会绕过斜坡立即归零。
-    max_linear_acceleration: 0.40
+    max_linear_acceleration: 0.60
     max_angular_acceleration: 1.80
     max_error_derivative: 3.0
     # 视觉抖动会直接进误差项，先加大低通

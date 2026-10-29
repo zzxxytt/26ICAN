@@ -93,7 +93,8 @@ public:
         serial_fd_(-1),                            // 初始化串口文件描述符
         serial_selected_(false),                   // 串口选择标志
         last_odom_time_(this->get_clock()->now()), // 初始化里程计时间
-        internal_system(SSB_IDX, CROSSING_IDX, TUNNEL_IDX)
+
+        internal_system(SSB_IDX, CROSSING_IDX, TUNNEL_IDX, STAIR_IDX) // 初始化Internal类实例
   {
     // ros2 run without parameters keeps the original interactive selector.
     // A launch file can pass serial_port to start unattended.
@@ -274,6 +275,7 @@ private:
     // these POD structures uninitialized until callbacks/timeouts ran, which
     // could put indeterminate values on the wire during node startup.
     get_ComWheelLegged = {};
+    get_ComWheelLegged.set |= 0x0002U;
     get_ComWheelLegged.linear_velocity = 0.0f;
     get_ComWheelLegged.angle_velocity = 0.0f;
     get_ComWheelLegged.leg_length = Default_Height;
@@ -701,6 +703,7 @@ private:
     msg.name = {"joint_height", "joint_roll", "joint_pitching"};
     msg.position = get_pos_decision(); // 腿高(m), 横滚(deg), 俯仰(deg)
     auto_pos_pub_->publish(msg);
+    //detect_jump();
   }
 
   // 回调函数处理接收到的关节控制消息（
@@ -1415,6 +1418,7 @@ private:
     {
       internal_system.init(My_Imu.yaw_rad);
       internal_system.enable_rec();
+      is_jumped = 0;
       std::cout << "RECORD_BEGIN_PT\n";
       break;
     }
@@ -1437,6 +1441,7 @@ private:
     {
       internal_system.enable_dis();
       internal_system.init(My_Imu.yaw_rad);
+      is_jumped = 0;
       break;
     }
     case DISABLE:
@@ -1454,9 +1459,9 @@ private:
   {
     static int pause_flag = 0;
     static std::chrono::steady_clock::time_point crossing_start;
-    if(internal_system.is_stop())
+    if (internal_system.is_stop())
     {
-      pause_flag=1;
+      pause_flag = 1;
       crossing_start = std::chrono::steady_clock::now();
     }
     switch (pause_flag)
@@ -1466,7 +1471,7 @@ private:
       break;
     case 1:
     {
-      if(std::chrono::steady_clock::now() - crossing_start < std::chrono::seconds(5))
+      if (std::chrono::steady_clock::now() - crossing_start < std::chrono::seconds(5))
       {
         return true;
       }
@@ -1484,49 +1489,30 @@ private:
 
   float get_speed_decision()
   {
-    if(Sbus.swb)
+    if (Sbus.swb)
     {
-      if(!get_pause_command())
+      if (get_pause_command())
       {
-        stop_init=0;
-        return 1.0f;
+        return 0.0f;
       }
       else
       {
-        if(!stop_init)
-        {
-          stop_point = internal_system.get_pos_now(); 
-          stop_init=1;
-          return 0.0f;
-        }
-        else
-        {
-          float delta_y = internal_system.get_pos_now().y - (stop_point.y - 15.0f);
-          if(std::abs(delta_y)>5.0f)
-          {
-            float speed_cmd = std::clamp(STOP_KP * delta_y, -0.2f, 0.2f);
-            return speed_cmd;
-          }
-          else
-          {
-            return 0.0f;
-          }
-        }
+        return 1.0f;
       }
     }
     else
     {
       return 0.0f;
     }
+  }
 
-    // if (Sbus.swb&&!get_pause_command())
-    // {
-    //   return 1.0f;
-    // }
-    // else
-    // {
-    //   return 0.0f;
-    // }
+  void detect_jump(void)
+  {
+    if (internal_system.is_stair() && !is_jumped)
+    {
+      request_jump();
+      is_jumped = 1;
+    }
   }
 
   float get_gyro_decision()
@@ -1602,6 +1588,26 @@ private:
     }
   }
 
+  void request_jump(void)
+  {
+    constexpr uint16_t kJumpBit = 0x0001U;
+    std::cout << "jump" << std::endl;
+
+    // 一次跳跃脉冲尚未结束，忽略重复请求
+    if (jump_pulse_active_)
+      return;
+
+    jump_pulse_active_ = true;
+    get_ComWheelLegged.set |= kJumpBit;
+
+    // 200 ms 后清除跳跃位，让下一次请求能产生新的上升沿
+    jump_pulse_timer_ = this->create_wall_timer(200ms, [this]()
+                                                {
+      get_ComWheelLegged.set &= static_cast<uint16_t>(~0x0001U);
+      jump_pulse_active_ = false;
+      jump_pulse_timer_->cancel(); });
+  }
+
   ////////////////////////////我的函数//////////////////////////////////////
   // ===================== 成员变量 =====================
   rclcpp::TimerBase::SharedPtr timer_;  // 定时器
@@ -1667,11 +1673,36 @@ private:
   Sbus_t Sbus;
   int last_swd = 0;
   int last_swb = 0;
+  int dis_count;
   Time_dt_t update_dt;
   Internal internal_system;
-  int stop_init = 0;
-  point_t stop_point;
-  Pid pos_pid;
+  bool jump_pulse_active_ = false;
+  rclcpp::TimerBase::SharedPtr jump_pulse_timer_;
+  int is_jumped = 0;
+
+  // 新增视觉通道；原有函数和定时调用保持原样。
+  // 回调只消费确认结果的上升沿，避免连续 true 导致重复起跳。
+  void vision_step_callback(const std_msgs::msg::Bool::SharedPtr msg)
+  {
+    const bool rising = msg->data && !vision_step_detected_;
+    vision_step_detected_ = msg->data;
+    if (!rising)
+      return;
+    if (jump_pulse_active_)
+    {
+      RCLCPP_WARN(this->get_logger(), "视觉台阶已确认，但跳跃脉冲正在执行，本次不重复触发");
+      return;
+    }
+    RCLCPP_INFO(this->get_logger(), "视觉台阶确认：调用 request_jump()");
+    request_jump();
+  }
+
+  bool vision_step_detected_ = false;
+  // Node 基类构造后初始化新订阅，不改动原 initROSComponents()。
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr vision_step_sub_ =
+      this->create_subscription<std_msgs::msg::Bool>(
+          "/vision/step_detected", rclcpp::QoS(10).reliable().durability_volatile(),
+          std::bind(&Legwheel::vision_step_callback, this, std::placeholders::_1));
 };
 
 // 主函数

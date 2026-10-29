@@ -4,6 +4,7 @@
 一圈固定顺序：
     FIRST_CORNER -> SEEK_PLATFORM -> CROSS_PLATFORM -> SEEK_ROUNDABOUT
     -> ROUNDABOUT -> SEEK_ZEBRA -> LAP_COMPLETE -> 下一圈 FIRST_CORNER
+    roundabout_mode=off 时跳过 SEEK_ROUNDABOUT / ROUNDABOUT，继续巡线找斑马线。
 
 规则：
     * 每个阶段只允许自己的元素触发；may_trigger 还要求本圈未消费过该元素；
@@ -165,12 +166,19 @@ class TrackPhaseManager:
         config: Optional[PhaseConfig] = None,
         start_phase: TrackPhase = TrackPhase.FIRST_CORNER,
         on_change: Optional[Callable[[PhaseTransition], None]] = None,
+        roundabout_enabled: bool = True,
     ) -> None:
         self.cfg = config if config is not None else PhaseConfig()
         self.cfg.validate()
         if not isinstance(start_phase, TrackPhase):
             start_phase = TrackPhase(str(start_phase))
-        self.phase = start_phase
+        self.roundabout_enabled = bool(roundabout_enabled)
+        self.phase = (
+            TrackPhase.SEEK_ZEBRA
+            if not self.roundabout_enabled and start_phase in (
+                TrackPhase.SEEK_ROUNDABOUT, TrackPhase.ROUNDABOUT
+            ) else start_phase
+        )
         self.lap = 1
         self.phase_since: Optional[float] = None
         self.last_transition: Optional[PhaseTransition] = None
@@ -182,7 +190,18 @@ class TrackPhaseManager:
 
     # ---------------- 查询 ----------------
     def permits(self, element: TrackElement) -> bool:
+        if element is TrackElement.ROUNDABOUT and not self.roundabout_enabled:
+            return False
         return element in PHASE_ELEMENTS[self.phase]
+
+    def set_roundabout_enabled(self, enabled: bool, now: float) -> None:
+        # 独立于阶段证据保存，下一圈重置证据时不能重新打开圆环。
+        self.roundabout_enabled = bool(enabled)
+        if not self.roundabout_enabled and self.phase in (
+            TrackPhase.SEEK_ROUNDABOUT, TrackPhase.ROUNDABOUT
+        ):
+            self._advance(TrackPhase.SEEK_ZEBRA, now, "roundabout_disabled",
+                          "圆环关闭，继续巡线寻找斑马线")
 
     def may_trigger(self, element: TrackElement) -> bool:
         return self.permits(element) and not self._consumed[element]
@@ -396,7 +415,8 @@ class TrackPhaseManager:
                 and self._step_clear_frames < cfg.platform_clear_frames):
             return
         self._advance(
-            TrackPhase.SEEK_ROUNDABOUT, now, "platform_cleared",
+            TrackPhase.SEEK_ROUNDABOUT if self.roundabout_enabled else TrackPhase.SEEK_ZEBRA,
+            now, "platform_cleared" if self.roundabout_enabled else "roundabout_disabled",
             "line_clear=%d step_clear=%d step_required=%d" % (
                 self._line_clear_frames, self._step_clear_frames,
                 int(self._step_clear_required),
@@ -407,9 +427,10 @@ class TrackPhaseManager:
     def observe_roundabout(self, now, mode="off", state="", completed=0,
                            junction=False) -> None:
         self._ensure_phase_start(now)
+        self.set_roundabout_enabled(str(mode).lower() in ("observe", "control"), now)
+        if not self.roundabout_enabled:
+            return
         if self.phase is TrackPhase.SEEK_ROUNDABOUT:
-            if str(mode).lower() == "off":
-                return
             if state in RING_ENTRY_STATES:
                 if self._advance(TrackPhase.ROUNDABOUT, now,
                                  "roundabout_entry",

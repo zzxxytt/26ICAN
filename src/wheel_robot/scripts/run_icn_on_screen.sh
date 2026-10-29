@@ -11,6 +11,10 @@
 # 用法：
 #   bash run_icn_on_screen.sh                        # 默认能动
 #   bash run_icn_on_screen.sh enable_motion:=false   # 架空，只看图不动车
+#   bash run_icn_on_screen.sh roundabout_mode:=off   # 无圆环阶段，过平台后巡线找斑马线
+#   bash run_icn_on_screen.sh roundabout_mode:=observe # 有圆环识别阶段，不接管转向
+#   不传 roundabout_mode 时读取 icn.yaml（当前为 off）。
+#   bash run_icn_on_screen.sh roundabout_mode:=control # 有圆环识别阶段，并接管绕环
 #   LOCAL_DISPLAY=:1 bash run_icn_on_screen.sh       # 桌面在别的 display
 #   KEEPAWAKE=0 bash run_icn_on_screen.sh            # 不碰熄屏设置
 #

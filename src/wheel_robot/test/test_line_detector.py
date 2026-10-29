@@ -687,6 +687,33 @@ class RoundaboutIntegrationTest(unittest.TestCase):
         node._step_state(1.0)
         self.assertEqual(node.state, MissionState.LINE)
 
+    def test_icn_step_gap_is_not_vetoed_by_line_loss_or_corner(self):
+        from icn import IcnNode
+        from track_phase import TrackPhase, TrackPhaseManager
+        node = IcnNode.__new__(IcnNode)
+        node._phase = TrackPhaseManager(start_phase=TrackPhase.SEEK_PLATFORM)
+        node.step_enabled = node._step_armed = node._step_confirmed = True
+        node._step_cooldown_until = 0.0
+        for valid in (False, True):
+            result = DetectionResult(valid, 0.95, 0.9, "corner", light_floor(), corner=True)
+            self.assertTrue(node._step_ready(1.0, result))
+        node._phase.begin_platform(2.0)
+        self.assertFalse(node._step_ready(3.0, result))
+
+    def test_icn_off_parameter_wins_over_stale_ring_adapter(self):
+        from icn import IcnNode
+        from track_phase import TrackPhase, TrackPhaseManager
+        node = IcnNode.__new__(IcnNode)
+        node._phase = TrackPhaseManager(start_phase=TrackPhase.SEEK_ROUNDABOUT)
+        node.get_parameter = lambda _: SimpleNamespace(value="off")
+        node._roundabout = SimpleNamespace(
+            mode="observe", machine=SimpleNamespace(state=State.ENTER, completed=0),
+            observation=SimpleNamespace(junction=True),
+        )
+        node._observe_phase_roundabout(1.0)
+        self.assertEqual(node._phase.phase, TrackPhase.SEEK_ZEBRA)
+        self.assertFalse(node._ring_should_run())
+
 
 if __name__ == "__main__":
     unittest.main()

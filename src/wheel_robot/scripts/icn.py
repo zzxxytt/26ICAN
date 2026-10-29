@@ -83,6 +83,7 @@ ELEMENT_DEFAULTS = {
     "step_decimate": 2,
     "step_confirm_frames": 3,
     "step_action": "stop",
+    "step_jump_enabled": False,  # 显式启用后，每圈进入台阶动作时请求一次跳跃
     "step_hold_seconds": 0.0,
     "step_stop_seconds": 1.0,
     "step_climb_speed": 0.15,
@@ -95,7 +96,7 @@ ELEMENT_DEFAULTS = {
     "step_bright_value_min": 110,
     "step_gap_bright_min": 0.55,
     "step_min_gap_rows": 12,
-     # 台阶：弯道排除 / 平台前缘 / 表面 / 时序一致性
+    # 旧视觉参数保留兼容；简化检测不再使用颜色、弯道、前缘条件。
     "step_platform_value_min": 95,
     "step_platform_saturation_max": 150,
     "step_wood_hue_min": 5,
@@ -112,7 +113,7 @@ ELEMENT_DEFAULTS = {
     "step_edge_min_width_ratio": 0.45,
     "step_edge_row_tolerance": 7,
     "step_require_edge": True,
-    "step_track_confirm_frames": 4,
+    "step_track_confirm_frames": 1,
     "step_track_max_frame_gap": 0.30,
     "step_track_edge_row_range": 8,
     "step_track_lateral_range": 0.10,
@@ -183,8 +184,8 @@ class IcnNode(line_lib.LineFollower):
             if name not in skip_step_fields
         }
         step_values.update(
-            top_ratio=self.search_top_ratio,
-            bottom_ratio=self.search_bottom_ratio,
+            top_ratio=0.40,
+            bottom_ratio=0.80,
             left_ratio=self.search_left_ratio,
             right_ratio=self.search_right_ratio,
             dark_value_max=self.hsv_upper_v,
@@ -226,6 +227,8 @@ class IcnNode(line_lib.LineFollower):
             config=self._build_phase_config(),
             start_phase=self._read_start_phase(),
             on_change=self._on_phase_change,
+            roundabout_enabled=str(self.get_parameter("roundabout_mode").value).lower()
+            in ("observe", "control"),
         )
 
         # ---------------- 输出话题 ----------------
@@ -237,6 +240,8 @@ class IcnNode(line_lib.LineFollower):
             or self.create_publisher(UInt8, "/zebra_crossing/stripe_count", 1)
         )
         self._step_pub = self.create_publisher(Bool, "/step/detected", 1)
+        # 默认可靠、volatile：不向后启动的底盘重放旧跳跃请求。
+        self._vision_step_pub = self.create_publisher(Bool, "/vision/step_detected", 10)
         self._state_pub = self.create_publisher(String, "/icn/state", 10)
         self._phase_pub = self.create_publisher(String, "/icn/phase", 10)
         self._lap_pub = self.create_publisher(UInt8, "/icn/lap", 10)
@@ -340,14 +345,13 @@ class IcnNode(line_lib.LineFollower):
 
     def _observe_phase_roundabout(self, now: float) -> None:
         ring = getattr(self, "_roundabout", None)
+        mode = str(self.get_parameter("roundabout_mode").value).lower()
         if ring is None:
             self._ring_state_text = "N/A"
-            mode = str(self.get_parameter("roundabout_mode").value).lower()
             self._phase.observe_roundabout(
                 now, mode=mode, state="", completed=0, junction=False
             )
             return
-        mode = str(ring.mode)
         machine = ring.machine
         self._ring_state_text = machine.state.value
         self._phase.observe_roundabout(
@@ -496,11 +500,9 @@ class IcnNode(line_lib.LineFollower):
         self._step_confirmed = self._step_tracker.update(step, now)
         if self._step_confirmed and not was_confirmed:
             self.get_logger().info(
-                "台阶确认(时序一致): gap=%dpx surface=%.2f wood=%.2f "
-                "edge=%d at_edge=%d curve=%d phase=%s 动作=%s"
-                % (step.gap_rows, step.surface_ratio, step.wood_ratio,
-                   step.edge_row, int(step.line_ends_at_edge),
-                   int(step.curve), self._phase.phase.value, self.step_action)
+                "台阶确认(连续无黑线): gap=%dpx min=%d phase=%s 动作=%s"
+                % (step.gap_rows, self._step_cfg.min_gap_rows,
+                   self._phase.phase.value, self.step_action)
             )
         self._step_pub.publish(Bool(data=self._step_confirmed))
         return True
@@ -534,7 +536,16 @@ class IcnNode(line_lib.LineFollower):
         self._set_state(
             MissionState.STAIR, "step_confirmed action=%s" % self.step_action
         )
+        # 新增：只有允许运动时，才把台阶确认结果发送给底盘。
+        if self.enable_motion:
+            # 先复位，再发布确认结果，第二圈可以再次产生上升沿。
+            self._vision_step_pub.publish(Bool(data=False))
+            self._vision_step_pub.publish(Bool(data=True))
 
+            self.get_logger().info(
+                "第 %d 圈：发布台阶确认结果 /vision/step_detected"
+                % self._phase.lap
+            )
     def _leave_stair(self, now: float) -> None:
         self._step_cooldown_until = now + self.step_cooldown_seconds
         self._step_confirmed = False
@@ -602,10 +613,6 @@ class IcnNode(line_lib.LineFollower):
         if not self._step_armed or not self._step_confirmed:
             return False
         if now < self._step_cooldown_until:
-            return False
-        if not self._error_within(result, self.step_trigger_max_error):
-            return False
-        if result is not None and result.valid and result.corner:
             return False
         return True
 
@@ -732,6 +739,10 @@ class IcnNode(line_lib.LineFollower):
         result = self.detector.detect(frame)
 
         # 2) 阶段证据：首弯进度 / 平台通过
+        self._phase.set_roundabout_enabled(
+            str(self.get_parameter("roundabout_mode").value).lower()
+            in ("observe", "control"), now,
+        )
         self._observe_phase_line(now, result)
 
         # 3) 圆环：只在圆环阶段允许接管
@@ -826,12 +837,11 @@ class IcnNode(line_lib.LineFollower):
                 )
                 self._log_status(
                     now,
-                    "STAIR 动作=%s v=%.3f gap=%dpx bright=%.2f"
+                    "STAIR 动作=%s v=%.3f gap=%dpx"
                     % (
                         self.step_action,
                         cmd_linear,
                         self._step_gap,
-                        self._step_bright,
                     ),
                 )
                 return
@@ -865,13 +875,12 @@ class IcnNode(line_lib.LineFollower):
             self._show_debug(result, 0.0, 0.0, False)
             self._log_status(
                 now,
-                "STOP %s conf=%.2f phase=%s %s %s"
+                "STOP %s conf=%.2f phase=%s %s"
                 % (
                     result.reason,
                     result.confidence,
                     self._phase.describe(),
                     self._phase.evidence_text(),
-                    getattr(self.detector, "last_diagnostics", ""),
                 ),
             )
             return
@@ -941,9 +950,8 @@ class IcnNode(line_lib.LineFollower):
         step = self._step_last
         step_extra = ""
         if step is not None:
-            step_extra = "  gap=%d surf=%.2f curve=%d edge=%d" % (
-                step.gap_rows, step.surface_ratio,
-                int(step.curve), int(step.line_ends_at_edge),
+            step_extra = "  gap=%d/%d rows" % (
+                step.gap_rows, self._step_cfg.min_gap_rows,
             )
         cv2.putText(
             debug,
@@ -989,31 +997,26 @@ class IcnNode(line_lib.LineFollower):
             (200, 200, 200), 1, cv2.LINE_AA,
         )
 
-        # 台阶缺口框 + 前缘线
-        if step is not None and step.gap_rows > 0:
+        # 蓝框为实际搜索区，红/橙框为本帧最长缺口。
+        if step is not None:
             frame_h, frame_w = debug.shape[:2]
-            rx0 = int(frame_w * self.search_left_ratio)
-            rx1 = int(frame_w * self.search_right_ratio)
-            ry0 = int(frame_h * self.search_top_ratio)
-            rx_center0 = rx0 + int(
-                (rx1 - rx0) * self.step_center_left_ratio
-            )
-            rx_center1 = rx0 + int(
-                (rx1 - rx0) * self.step_center_right_ratio
-            )
+            rx0 = int(frame_w * self._step_cfg.left_ratio)
+            rx1 = int(frame_w * self._step_cfg.right_ratio)
+            ry0 = int(frame_h * self._step_cfg.top_ratio)
+            ry1 = int(frame_h * self._step_cfg.bottom_ratio)
+            rx_center0 = rx0 + int(round((rx1 - rx0) * self._step_cfg.center_left_ratio))
+            rx_center1 = rx0 + int(round((rx1 - rx0) * self._step_cfg.center_right_ratio))
+            search_top = ry0 + int(round((ry1 - ry0) * self._step_cfg.gap_top_ratio))
+            search_bottom = ry0 + int(round((ry1 - ry0) * self._step_cfg.gap_bottom_ratio))
             cv2.rectangle(
-                debug,
-                (rx_center0, ry0 + step.gap_start_row),
-                (rx_center1 - 1, ry0 + step.gap_start_row + step.gap_rows - 1),
-                (0, 0, 255) if self._step_confirmed else (0, 165, 255),
-                2,
+                debug, (rx_center0, search_top), (rx_center1 - 1, search_bottom - 1),
+                (255, 200, 0), 1,
             )
-            if step.edge_row >= 0:
-                cv2.line(
-                    debug,
-                    (rx0, ry0 + step.edge_row),
-                    (rx1 - 1, ry0 + step.edge_row),
-                    (255, 255, 0), 2,
+            if step.gap_rows > 0:
+                cv2.rectangle(
+                    debug, (rx_center0, ry0 + step.gap_start_row),
+                    (rx_center1 - 1, ry0 + step.gap_start_row + step.gap_rows - 1),
+                    (0, 0, 255) if self._step_confirmed else (0, 165, 255), 2,
                 )
 
         super()._show_debug(
