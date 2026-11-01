@@ -480,6 +480,17 @@ private:
       ComWheelLegged.pitch_angle = 0;
       // std::cout << " 姿态更新超时\n";
     }
+    
+    RCLCPP_INFO_THROTTLE(
+    this->get_logger(),
+    *this->get_clock(),
+    100,
+    "TX v=%.3f pitch=%.1f jump_stage=%d actual_v=%.3f cmd_age=%.2f",
+    static_cast<double>(ComWheelLegged.linear_velocity),
+    static_cast<double>(ComWheelLegged.pitch_angle),
+    vision_jump_stage_,
+    static_cast<double>(ROS_body.milemeter.Speed),
+    static_cast<double>(COD_vel_dt.dt));
 
     if (get_ComWheelLegged.count == 255)
       get_ComWheelLegged.count = 0;
@@ -1699,16 +1710,16 @@ private:
             std::chrono::steady_clock::now() -
             vision_jump_start_).count();
 
-    if (vision_jump_stage_ == 1 && elapsed >= 0.8)
+    if (vision_jump_stage_ == 1 && elapsed >= 1.25)
     {
-      // 已保持水平目标1.3秒，调用原来的跳跃函数。
+      // 已保持水平目标1.4秒，调用原来的跳跃函数。
       request_jump();
 
       vision_jump_stage_ = 2;
       vision_jump_start_ =
           std::chrono::steady_clock::now();
     }
-    else if (vision_jump_stage_ == 2 && elapsed >= 0.3)
+    else if (vision_jump_stage_ == 2 && elapsed >= 0.8)
     {
       // 恢复 get_pos_decision() 原本返回的姿态。
       vision_jump_stage_ = 0;

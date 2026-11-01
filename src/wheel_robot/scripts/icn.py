@@ -184,8 +184,8 @@ class IcnNode(line_lib.LineFollower):
             if name not in skip_step_fields
         }
         step_values.update(
-            top_ratio=0.70,
-            bottom_ratio=1.00,
+            top_ratio=0.50,
+            bottom_ratio=0.80,
             left_ratio=self.search_left_ratio,
             right_ratio=self.search_right_ratio,
             dark_value_max=self.hsv_upper_v,
